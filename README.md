@@ -12,8 +12,47 @@ Momentum is a single-user personal productivity app: no accounts, no backend, no
 
 ---
 
+## Use Momentum
+
+### 👉 [**Open Momentum**](https://omar-issam-abdelhalim.github.io/momentum/)
+
+That's it — **no download, no GitHub account, no sign-up, nothing to clone or install to just try it.** Open the link above in any modern browser (Chrome, Safari, Edge, Firefox) on your phone, tablet, or computer, and the app is ready to use immediately. Installing it as described below is optional and just makes it feel like a native app on your device.
+
+#### Install on Android
+
+1. Open the link above in **Chrome**.
+2. Tap the **⋮** menu in the top right.
+3. Tap **"Install app"** (or **"Add to Home screen"**).
+4. Confirm — Momentum now appears as an app icon on your home screen and app drawer.
+
+#### Add to Home Screen on iPhone / iPad
+
+1. Open the link above in **Safari** (installation must be done from Safari on iOS).
+2. Tap the **Share** icon (the square with an arrow pointing up) in the toolbar.
+3. Scroll down and tap **"Add to Home Screen."**
+4. Tap **"Add"** in the top right — Momentum now appears as an app icon on your home screen.
+
+#### Install on desktop (Chrome, Edge)
+
+1. Open the link above.
+2. Click the **install icon** in the address bar (or the in-app "Install" banner near the bottom of the Home screen), then confirm.
+3. Momentum opens in its own app window, separate from your browser tabs.
+
+#### Just want to use it in the browser?
+
+That works too — nothing above is required. Momentum runs fully in the browser tab with no loss of functionality; installing only adds a home-screen icon and a standalone window.
+
+#### About your data
+
+Momentum stores everything **locally on the device you're using** — there is no account and no server, so **your data is not automatically synced between your phone, tablet, and computer.** Each device has its own separate copy.
+
+To move your data to another device, or to keep a backup, use **Settings → Export Backup** to save a JSON file, then **Settings → Import Backup** on the other device (or after reinstalling) to restore it.
+
+---
+
 ## Contents
 
+- [Use Momentum](#use-momentum)
 - [Screenshots](#screenshots)
 - [Key features](#key-features)
 - [Technology stack](#technology-stack)
@@ -159,14 +198,18 @@ To test on your phone during development, run `npm run dev`, make sure your phon
 
 ## Deploying for HTTPS access
 
-The app is a static build with no backend — any static HTTPS host works:
+The live app at **https://omar-issam-abdelhalim.github.io/momentum/** is deployed on **GitHub Pages**, built and published automatically by the GitHub Actions workflow at [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) on every push to `main`. That workflow runs the full check suite (typecheck, lint, tests) before building, so a broken change never reaches production.
+
+The app is a static build with no backend, so any static HTTPS host works if you want to deploy your own fork:
 
 ```bash
 npm run build
-# deploy the contents of dist/ to Netlify, Vercel, Cloudflare Pages, GitHub Pages, etc.
+# deploy the contents of dist/ to Netlify, Vercel, Cloudflare Pages, a custom domain, etc.
 ```
 
-No environment variables or server configuration are required. Once deployed, open the HTTPS URL on your phone and install it from there — that installation's data is separate from any other device (local storage is per-device); use Export/Import in Settings to move data between them.
+No environment variables or server configuration are required for a root-domain deploy. GitHub Pages is the one exception: since a GitHub Pages *project* site is served from a subpath (`https://<user>.github.io/<repo>/`, not the domain root), the build needs to know that ahead of time so the PWA manifest, service worker scope, and asset URLs all agree — that's what the `GITHUB_PAGES=true npm run build` step in the CI workflow does (see the `base` logic in `vite.config.ts`). Building normally (`npm run build`, no env var) targets the domain root and is correct for every other host.
+
+Once deployed, open the HTTPS URL on your phone and install it from there — that installation's data is separate from any other device (local storage is per-device); use Export/Import in Settings to move data between them.
 
 ## Project structure
 
