@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: 250 250 249;
+  --surface-raised: 255 255 255;
+  --surface-sunken: 245 245 244;
+
+  --ink: 28 25 23;
+  --ink-muted: 120 113 108;
+  --ink-faint: 168 162 158;
+
+  --border: 231 229 228;
+  --border-strong: 214 211 209;
+
+  --accent: 67 56 202;
+  --accent-muted: 224 222 251;
+
+  --success: 5 150 105;
+  --warning: 180 100 6;
+  --danger: 220 38 38;
+
+  color-scheme: light;
+}
+
+.dark {
+  --surface: 22 22 24;
+  --surface-raised: 32 32 35;
+  --surface-sunken: 14 14 16;
+
+  --ink: 250 250 249;
+  --ink-muted: 161 161 170;
+  --ink-faint: 96 96 102;
+
+  --border: 45 45 49;
+  --border-strong: 63 63 70;
+
+  --accent: 141 151 250;
+  --accent-muted: 49 46 84;
+
+  --success: 52 211 153;
+  --warning: 251 191 36;
+  --danger: 248 113 113;
+
+  color-scheme: dark;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
+body {
+  @apply bg-surface text-ink antialiased;
+  font-synthesis: none;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+::selection {
+  background-color: rgb(var(--accent) / 0.25);
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Hide default number spinners so custom counters look intentional. */
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer utilities {
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
