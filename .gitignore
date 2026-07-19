@@ -39,5 +39,8 @@ pnpm-debug.log*
 # Local tooling (this AI coding assistant's per-machine settings, not part of the app)
 .claude/
 
+# Local-only persistent project memory for AI assistant sessions — never committed/pushed
+PROJECT_CONTEXT.md
+
 # Misc
 *.local
