@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { runWeeklyRollover } from '@/lib/db/rolloverRunner'
+import { runRecurringGeneration } from '@/lib/db/recurringRunner'
 import { runDataCleanup } from '@/lib/db/cleanupRunner'
 import { initSettings } from '@/lib/db/db'
 
@@ -18,6 +19,7 @@ export function useAppInit(): InitState {
       try {
         await initSettings()
         await runWeeklyRollover()
+        await runRecurringGeneration()
         await runDataCleanup()
         if (!cancelled) setState({ ready: true, error: null })
       } catch (err) {

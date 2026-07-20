@@ -8,6 +8,7 @@ import type { AppSettings } from '@/types/models'
 
 async function resetDb() {
   await db.goals.clear()
+  await db.recurringDefinitions.clear()
   await db.habits.clear()
   await db.habitCompletions.clear()
   await db.weeklySnapshots.clear()
@@ -68,8 +69,8 @@ describe('runWeeklyRollover', () => {
     vi.setSystemTime(new Date(2026, 6, 20)) // WEEK_0
     await seedSettings({ lastWeekIdSeen: WEEK_0 })
 
-    const incomplete = await createGoal({ title: 'Ship feature', type: 'weekly' })
-    const complete = await createGoal({ title: 'Write docs', type: 'weekly' })
+    const incomplete = await createGoal({ title: 'Ship feature', kind: 'weekly' })
+    const complete = await createGoal({ title: 'Write docs', kind: 'weekly' })
     await db.goals.update(complete.id, { completed: true, completedAt: Date.now() })
 
     vi.setSystemTime(new Date(2026, 6, 27)) // now WEEK_1
@@ -78,9 +79,9 @@ describe('runWeeklyRollover', () => {
     expect(result.processedWeeks).toEqual([WEEK_0])
 
     const snapshot = await db.weeklySnapshots.get(WEEK_0)
-    expect(snapshot?.totalPlanned).toBe(2)
-    expect(snapshot?.completed).toBe(1)
-    expect(snapshot?.rolledOver).toBe(1)
+    expect(snapshot?.weeklyPlanned).toBe(2)
+    expect(snapshot?.weeklyCompleted).toBe(1)
+    expect(snapshot?.weeklyRolledOver).toBe(1)
 
     const rolledGoal = await db.goals.get(incomplete.id)
     expect(rolledGoal?.currentWeekId).toBe(WEEK_1)
@@ -96,7 +97,7 @@ describe('runWeeklyRollover', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date(2026, 6, 20))
     await seedSettings({ lastWeekIdSeen: WEEK_0 })
-    const goal = await createGoal({ title: 'Ship feature', type: 'weekly' })
+    const goal = await createGoal({ title: 'Ship feature', kind: 'weekly' })
 
     vi.setSystemTime(new Date(2026, 6, 27))
     await runWeeklyRollover()
@@ -123,7 +124,7 @@ describe('runWeeklyRollover', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date(2026, 6, 20)) // WEEK_0
     await seedSettings({ lastWeekIdSeen: WEEK_0 })
-    const goal = await createGoal({ title: 'Long-running goal', type: 'weekly' })
+    const goal = await createGoal({ title: 'Long-running goal', kind: 'weekly' })
 
     vi.setSystemTime(new Date(2026, 7, 10)) // now inside WEEK_3, 3 weeks later
     const result = await runWeeklyRollover()
@@ -143,17 +144,36 @@ describe('runWeeklyRollover', () => {
     expect(settings?.lastWeekIdSeen).toBe(WEEK_3)
   })
 
-  it('never rolls over daily goals', async () => {
+  it('never rolls over scheduled or today-only tasks', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date(2026, 6, 20))
     await seedSettings({ lastWeekIdSeen: WEEK_0 })
-    const daily = await createGoal({ title: 'Morning run', type: 'daily', dateISO: '2026-07-20' })
+    const scheduled = await createGoal({ title: 'Morning run', kind: 'scheduled', scheduledDateISO: '2026-07-20' })
+    const today = await createGoal({ title: 'Call Ahmed', kind: 'today', scheduledDateISO: '2026-07-20' })
 
     vi.setSystemTime(new Date(2026, 6, 27))
     await runWeeklyRollover()
 
-    const stored = await db.goals.get(daily.id)
-    expect(stored?.rolledOver).toBe(false)
-    expect(stored?.currentWeekId).toBe(WEEK_0) // daily goals don't use currentWeekId for rollover
+    const storedScheduled = await db.goals.get(scheduled.id)
+    const storedToday = await db.goals.get(today.id)
+    expect(storedScheduled?.rolledOver).toBe(false)
+    expect(storedToday?.rolledOver).toBe(false)
+    expect(storedScheduled?.currentWeekId).toBeUndefined()
+    expect(storedToday?.currentWeekId).toBeUndefined()
+  })
+
+  it('snapshots scheduled/today/recurring stats for the closing week even though they are not rolled over', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 20))
+    await seedSettings({ lastWeekIdSeen: WEEK_0 })
+    const scheduled = await createGoal({ title: 'Study lecture', kind: 'scheduled', scheduledDateISO: '2026-07-20' })
+    await db.goals.update(scheduled.id, { completed: true, completedAt: new Date(2026, 6, 20).getTime() })
+
+    vi.setSystemTime(new Date(2026, 6, 27))
+    await runWeeklyRollover()
+
+    const snapshot = await db.weeklySnapshots.get(WEEK_0)
+    expect(snapshot?.scheduledPlanned).toBe(1)
+    expect(snapshot?.scheduledCompleted).toBe(1)
   })
 })

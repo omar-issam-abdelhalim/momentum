@@ -8,6 +8,6 @@ export const APP_CONFIG = {
   name: 'Momentum',
   fullName: 'Momentum — Goals & Habits',
   tagline: 'Calm, focused progress — one week at a time.',
-  version: '1.0.0',
-  schemaVersion: 1,
+  version: '2.0.0',
+  schemaVersion: 2,
 } as const

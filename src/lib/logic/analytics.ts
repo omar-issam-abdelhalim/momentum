@@ -1,10 +1,128 @@
 import type { Habit, HabitCompletion, WeeklySnapshot } from '@/types/models'
 import { formatWeekRangeLabel } from '@/lib/date/week'
+import type { ResolvedRange } from '@/lib/date/ranges'
 import { computeHabitStreak } from './streaks'
 
-/** Snapshots that actually had goals planned — weeks with nothing planned don't count against realism metrics. */
-function withPlannedGoals(snapshots: WeeklySnapshot[]): WeeklySnapshot[] {
-  return snapshots.filter((s) => s.totalPlanned > 0)
+/** Snapshots whose selected range overlaps [startMs, endMs] (attributed by weekStart — see lib/date/ranges.ts). `range.startMs === null` (All time) matches everything. */
+export function filterSnapshotsInRange(snapshots: WeeklySnapshot[], range: ResolvedRange): WeeklySnapshot[] {
+  if (range.startMs === null || range.endMs === null) return snapshots
+  return snapshots.filter((s) => s.weekStart >= (range.startMs as number) && s.weekStart <= (range.endMs as number))
+}
+
+function pct(numerator: number, denominator: number): number | null {
+  return denominator === 0 ? null : Math.round((numerator / denominator) * 100)
+}
+
+export interface AggregateStats {
+  weeksCounted: number
+
+  weeklyPlanned: number
+  weeklyCompleted: number
+  weeklyCompletionPct: number | null
+  weeklyRolledOver: number
+  rolloverRatePct: number | null
+
+  scheduledPlanned: number
+  scheduledCompleted: number
+  scheduledCompletionPct: number | null
+  scheduledCompletedLate: number
+
+  todayOnlyPlanned: number
+  todayOnlyCompleted: number
+  todayOnlyCompletionPct: number | null
+  todayOnlyMissed: number
+  todayOnlyMissedPct: number | null
+
+  recurringPlanned: number
+  recurringCompleted: number
+  recurringCompletionPct: number | null
+  recurringCompletedLate: number
+
+  deadlinesDue: number
+  deadlinesMetOnTime: number
+  deadlinesMetLate: number
+  deadlinesMissed: number
+  deadlinePerformancePct: number | null
+  overdueDeadlineCount: number
+
+  averageLatenessDays: number | null
+
+  totalPlanned: number
+  totalCompleted: number
+  overallCompletionPct: number | null
+}
+
+/** Sums every counter across a set of weekly snapshots into range-wide totals and rates. Never fabricates a rate when the denominator is zero — returns null instead. */
+export function aggregateSnapshots(snapshots: WeeklySnapshot[]): AggregateStats {
+  const sum = (key: keyof WeeklySnapshot) => snapshots.reduce((acc, s) => acc + ((s[key] as number) ?? 0), 0)
+
+  const weeklyPlanned = sum('weeklyPlanned')
+  const weeklyCompleted = sum('weeklyCompleted')
+  const weeklyRolledOver = sum('weeklyRolledOver')
+
+  const scheduledPlanned = sum('scheduledPlanned')
+  const scheduledCompleted = sum('scheduledCompleted')
+  const scheduledCompletedLate = sum('scheduledCompletedLate')
+  const scheduledLateDaysSum = sum('scheduledLateDaysSum')
+
+  const todayOnlyPlanned = sum('todayOnlyPlanned')
+  const todayOnlyCompleted = sum('todayOnlyCompleted')
+  const todayOnlyMissed = sum('todayOnlyMissed')
+
+  const recurringPlanned = sum('recurringPlanned')
+  const recurringCompleted = sum('recurringCompleted')
+  const recurringCompletedLate = sum('recurringCompletedLate')
+  const recurringLateDaysSum = sum('recurringLateDaysSum')
+
+  const deadlinesDue = sum('deadlinesDue')
+  const deadlinesMetOnTime = sum('deadlinesMetOnTime')
+  const deadlinesMetLate = sum('deadlinesMetLate')
+  const deadlinesMissed = sum('deadlinesMissed')
+
+  const totalPlanned = weeklyPlanned + scheduledPlanned + todayOnlyPlanned + recurringPlanned
+  const totalCompleted = weeklyCompleted + scheduledCompleted + todayOnlyCompleted + recurringCompleted
+
+  const lateCount = scheduledCompletedLate + recurringCompletedLate
+  const lateDaysSum = scheduledLateDaysSum + recurringLateDaysSum
+
+  return {
+    weeksCounted: snapshots.length,
+
+    weeklyPlanned,
+    weeklyCompleted,
+    weeklyCompletionPct: pct(weeklyCompleted, weeklyPlanned),
+    weeklyRolledOver,
+    rolloverRatePct: pct(weeklyRolledOver, weeklyPlanned),
+
+    scheduledPlanned,
+    scheduledCompleted,
+    scheduledCompletionPct: pct(scheduledCompleted, scheduledPlanned),
+    scheduledCompletedLate,
+
+    todayOnlyPlanned,
+    todayOnlyCompleted,
+    todayOnlyCompletionPct: pct(todayOnlyCompleted, todayOnlyPlanned),
+    todayOnlyMissed,
+    todayOnlyMissedPct: pct(todayOnlyMissed, todayOnlyPlanned),
+
+    recurringPlanned,
+    recurringCompleted,
+    recurringCompletionPct: pct(recurringCompleted, recurringPlanned),
+    recurringCompletedLate,
+
+    deadlinesDue,
+    deadlinesMetOnTime,
+    deadlinesMetLate,
+    deadlinesMissed,
+    deadlinePerformancePct: pct(deadlinesMetOnTime, deadlinesDue),
+    overdueDeadlineCount: deadlinesMissed,
+
+    averageLatenessDays: lateCount === 0 ? null : Math.round((lateDaysSum / lateCount) * 10) / 10,
+
+    totalPlanned,
+    totalCompleted,
+    overallCompletionPct: pct(totalCompleted, totalPlanned),
+  }
 }
 
 export interface WeeklyCompletionPoint {
@@ -16,31 +134,29 @@ export interface WeeklyCompletionPoint {
   rolledOver: number
 }
 
+/** Trend series across a set of snapshots, for the completion/rollover charts. Combines every task kind's planned/completed into one figure per week. */
 export function weeklyCompletionSeries(snapshots: WeeklySnapshot[]): WeeklyCompletionPoint[] {
   return [...snapshots]
     .sort((a, b) => a.weekStart - b.weekStart)
-    .map((s) => ({
-      weekId: s.weekId,
-      label: formatWeekRangeLabel(s.weekId),
-      completionPct: s.completionPct,
-      planned: s.totalPlanned,
-      completed: s.completed,
-      rolledOver: s.rolledOver,
-    }))
+    .map((s) => {
+      const planned = s.weeklyPlanned + s.scheduledPlanned + s.todayOnlyPlanned + s.recurringPlanned
+      const completed = s.weeklyCompleted + s.scheduledCompleted + s.todayOnlyCompleted + s.recurringCompleted
+      return {
+        weekId: s.weekId,
+        label: formatWeekRangeLabel(s.weekId),
+        completionPct: planned === 0 ? 0 : Math.round((completed / planned) * 100),
+        planned,
+        completed,
+        rolledOver: s.weeklyRolledOver,
+      }
+    })
 }
 
-export function averageCompletionRate(snapshots: WeeklySnapshot[]): number | null {
-  const relevant = withPlannedGoals(snapshots)
-  if (relevant.length === 0) return null
-  const sum = relevant.reduce((acc, s) => acc + s.completionPct, 0)
-  return Math.round(sum / relevant.length)
-}
-
-export function averageRolloverRate(snapshots: WeeklySnapshot[]): number | null {
-  const relevant = withPlannedGoals(snapshots)
-  if (relevant.length === 0) return null
-  const sum = relevant.reduce((acc, s) => acc + s.rolledOver / s.totalPlanned, 0)
-  return Math.round((sum / relevant.length) * 100)
+/** Snapshots that had at least one planned item — weeks with nothing planned don't count against realism metrics. */
+function withPlannedItems(snapshots: WeeklySnapshot[]): WeeklySnapshot[] {
+  return snapshots.filter(
+    (s) => s.weeklyPlanned + s.scheduledPlanned + s.todayOnlyPlanned + s.recurringPlanned > 0,
+  )
 }
 
 export interface PlanningInsight {
@@ -55,40 +171,48 @@ export interface PlanningInsight {
  * recent snapshots (capped) so old history doesn't drown out recent trends.
  */
 export function generatePlanningInsights(snapshots: WeeklySnapshot[], recentWindow = 6): PlanningInsight[] {
-  const relevant = withPlannedGoals(snapshots)
+  const relevant = withPlannedItems(snapshots)
   if (relevant.length < 2) return []
 
   const recent = [...relevant].sort((a, b) => b.weekStart - a.weekStart).slice(0, recentWindow)
-  const avg = Math.round(recent.reduce((acc, s) => acc + s.completionPct, 0) / recent.length)
-  const rolloverAvg = Math.round(recent.reduce((acc, s) => acc + s.rolledOver / s.totalPlanned, 0) / recent.length * 100)
+  const stats = aggregateSnapshots(recent)
 
   const insights: PlanningInsight[] = []
+  const avg = stats.overallCompletionPct ?? 0
 
   if (avg < 50) {
     insights.push({
       id: 'completion-low',
       tone: 'observation',
-      text: `Over your last ${recent.length} planned weeks, you've completed about ${avg}% of your weekly goals on average. This suggests you may be planning more goals than you can realistically complete in one week.`,
+      text: `Over your last ${recent.length} planned weeks, you've completed about ${avg}% of your planned goals and tasks on average. This suggests you may be planning more than you can realistically complete.`,
     })
   } else if (avg < 80) {
     insights.push({
       id: 'completion-moderate',
       tone: 'neutral',
-      text: `You've completed about ${avg}% of your planned weekly goals on average over your last ${recent.length} planned weeks — a moderate, workable pace.`,
+      text: `You've completed about ${avg}% of your planned goals and tasks on average over your last ${recent.length} planned weeks — a moderate, workable pace.`,
     })
   } else {
     insights.push({
       id: 'completion-high',
       tone: 'positive',
-      text: `Your weekly planning has been consistently achievable — about ${avg}% of planned goals completed on average over your last ${recent.length} planned weeks.`,
+      text: `Your planning has been consistently achievable — about ${avg}% completed on average over your last ${recent.length} planned weeks.`,
     })
   }
 
-  if (rolloverAvg >= 40) {
+  if ((stats.rolloverRatePct ?? 0) >= 40) {
     insights.push({
       id: 'rollover-high',
       tone: 'observation',
-      text: `On average, ${rolloverAvg}% of your weekly goals roll over into the next week. Fewer, more targeted weekly goals may be easier to finish.`,
+      text: `On average, ${stats.rolloverRatePct}% of your weekly goals roll over into the next week. Fewer, more targeted weekly goals may be easier to finish.`,
+    })
+  }
+
+  if (stats.averageLatenessDays !== null && stats.averageLatenessDays >= 2) {
+    insights.push({
+      id: 'lateness-high',
+      tone: 'observation',
+      text: `Scheduled and recurring tasks that finish late do so by about ${stats.averageLatenessDays} days on average recently.`,
     })
   }
 
@@ -145,4 +269,10 @@ export function summarizeHabitAnalytics(
       bestStreak: streak.best,
     }
   })
+}
+
+/** Habit completions falling within a resolved range (null bounds = all time). Used for range-scoped habit activity counts. */
+export function completionsInRange(completions: HabitCompletion[], range: ResolvedRange): HabitCompletion[] {
+  if (range.startMs === null || range.endMs === null) return completions
+  return completions.filter((c) => c.completedAt >= (range.startMs as number) && c.completedAt <= (range.endMs as number))
 }

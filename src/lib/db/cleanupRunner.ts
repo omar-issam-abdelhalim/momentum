@@ -1,6 +1,6 @@
 import { db } from './db'
 import { getSettings, setLastCleanupAt } from './settings.repo'
-import { getGoalsEligibleForCleanup } from '@/lib/logic/cleanup'
+import { getGoalsEligibleForRetentionCleanup } from '@/lib/logic/cleanup'
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000
 
@@ -12,7 +12,9 @@ export interface CleanupResult {
 /**
  * Runs at most once per day (cheap idempotency guard — the underlying
  * deletion is itself idempotent since already-deleted goals just won't
- * match on a future run).
+ * match on a future run). Never touches WeeklySnapshots, RecurringDefinitions,
+ * Habits, or HabitCompletions — only detailed Goal records age out, and only
+ * once they're no longer operationally relevant (see lib/logic/cleanup.ts).
  */
 export async function runDataCleanup(force = false): Promise<CleanupResult> {
   const settings = await getSettings()
@@ -23,7 +25,7 @@ export async function runDataCleanup(force = false): Promise<CleanupResult> {
   }
 
   const allGoals = await db.goals.toArray()
-  const eligible = getGoalsEligibleForCleanup(allGoals, now)
+  const eligible = getGoalsEligibleForRetentionCleanup(allGoals, now)
 
   if (eligible.length > 0) {
     await db.goals.bulkDelete(eligible.map((g) => g.id))

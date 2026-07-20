@@ -1,15 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { isGoalEligibleForCleanup } from './cleanup'
+import { isGoalEligibleForRetentionCleanup } from './cleanup'
 import type { Goal } from '@/types/models'
 
-const NOW = new Date(2026, 7, 1).getTime() // 2026-08-01
-const DAY = 24 * 60 * 60 * 1000
+const NOW = new Date(2028, 0, 15).getTime() // 2028-01-15
 
 function makeGoal(overrides: Partial<Goal>): Goal {
   return {
     id: 'g',
     title: 'Goal',
-    type: 'weekly',
+    kind: 'weekly',
     createdAt: 0,
     completedAt: null,
     completed: false,
@@ -22,53 +21,63 @@ function makeGoal(overrides: Partial<Goal>): Goal {
   }
 }
 
-describe('isGoalEligibleForCleanup — weekly goals', () => {
-  it('is never eligible while incomplete, no matter how old', () => {
-    const goal = makeGoal({ type: 'weekly', completed: false, createdAt: NOW - 365 * DAY })
-    expect(isGoalEligibleForCleanup(goal, NOW)).toBe(false)
+describe('isGoalEligibleForRetentionCleanup — incomplete active kinds', () => {
+  it('an incomplete weekly goal is never eligible, no matter how old', () => {
+    const goal = makeGoal({ kind: 'weekly', completed: false, createdAt: new Date(2020, 0, 1).getTime() })
+    expect(isGoalEligibleForRetentionCleanup(goal, NOW)).toBe(false)
   })
 
-  it('is not eligible until 14 days after completion', () => {
-    const goal = makeGoal({ type: 'weekly', completed: true, completedAt: NOW - 10 * DAY })
-    expect(isGoalEligibleForCleanup(goal, NOW)).toBe(false)
+  it('an incomplete (Late) scheduled task is never eligible', () => {
+    const goal = makeGoal({ kind: 'scheduled', scheduledDateISO: '2020-01-01', completed: false })
+    expect(isGoalEligibleForRetentionCleanup(goal, NOW)).toBe(false)
   })
 
-  it('becomes eligible exactly at the 14-day threshold', () => {
-    const goal = makeGoal({ type: 'weekly', completed: true, completedAt: NOW - 14 * DAY })
-    expect(isGoalEligibleForCleanup(goal, NOW)).toBe(true)
-  })
-
-  it('is eligible well after 14 days', () => {
-    const goal = makeGoal({ type: 'weekly', completed: true, completedAt: NOW - 30 * DAY })
-    expect(isGoalEligibleForCleanup(goal, NOW)).toBe(true)
+  it('an incomplete (Late) recurring occurrence is never eligible', () => {
+    const goal = makeGoal({ kind: 'recurring', scheduledDateISO: '2020-01-01', completed: false })
+    expect(isGoalEligibleForRetentionCleanup(goal, NOW)).toBe(false)
   })
 })
 
-describe('isGoalEligibleForCleanup — daily goals', () => {
-  it('is not eligible for a recently completed daily goal', () => {
-    const goal = makeGoal({ type: 'daily', dateISO: '2026-07-30', completed: true, completedAt: NOW - 1 * DAY })
-    expect(isGoalEligibleForCleanup(goal, NOW)).toBe(false)
+describe('isGoalEligibleForRetentionCleanup — Today Only', () => {
+  it('an incomplete Today Only task from 2 calendar years ago is eligible', () => {
+    const goal = makeGoal({ kind: 'today', scheduledDateISO: '2026-03-01', completed: false })
+    expect(isGoalEligibleForRetentionCleanup(goal, NOW)).toBe(true)
   })
 
-  it('is eligible for an old incomplete daily goal whose day has long passed', () => {
-    const goal = makeGoal({ type: 'daily', dateISO: '2026-07-01', completed: false })
-    expect(isGoalEligibleForCleanup(goal, NOW)).toBe(true)
-  })
-
-  it('is not eligible for an incomplete daily goal from within the retention window', () => {
-    const goal = makeGoal({ type: 'daily', dateISO: '2026-07-25', completed: false })
-    expect(isGoalEligibleForCleanup(goal, NOW)).toBe(false)
-  })
-
-  it('is not eligible for today\'s incomplete daily goal', () => {
-    const goal = makeGoal({ type: 'daily', dateISO: '2026-08-01', completed: false })
-    expect(isGoalEligibleForCleanup(goal, NOW)).toBe(false)
+  it('an incomplete Today Only task from last year is not yet eligible', () => {
+    const goal = makeGoal({ kind: 'today', scheduledDateISO: '2027-03-01', completed: false })
+    expect(isGoalEligibleForRetentionCleanup(goal, NOW)).toBe(false)
   })
 })
 
-describe('isGoalEligibleForCleanup — archived goals', () => {
-  it('archived weekly goals follow the same completed+age rule', () => {
-    const archivedIncomplete = makeGoal({ type: 'weekly', archived: true, completed: false })
-    expect(isGoalEligibleForCleanup(archivedIncomplete, NOW)).toBe(false)
+describe('isGoalEligibleForRetentionCleanup — completed goals of any kind', () => {
+  it('a 2026 completion remains available throughout 2026 and 2027', () => {
+    const goal = makeGoal({ completed: true, completedAt: new Date(2026, 5, 1).getTime() })
+    expect(isGoalEligibleForRetentionCleanup(goal, new Date(2026, 11, 31).getTime())).toBe(false)
+    expect(isGoalEligibleForRetentionCleanup(goal, new Date(2027, 11, 31).getTime())).toBe(false)
+  })
+
+  it('a 2026 completion becomes eligible once 2028 begins', () => {
+    const goal = makeGoal({ completed: true, completedAt: new Date(2026, 5, 1).getTime() })
+    expect(isGoalEligibleForRetentionCleanup(goal, new Date(2028, 0, 1).getTime())).toBe(true)
+  })
+
+  it('applies the same rule to completed scheduled and recurring tasks', () => {
+    const scheduled = makeGoal({ kind: 'scheduled', completed: true, completedAt: new Date(2026, 5, 1).getTime() })
+    const recurring = makeGoal({ kind: 'recurring', completed: true, completedAt: new Date(2026, 5, 1).getTime() })
+    expect(isGoalEligibleForRetentionCleanup(scheduled, NOW)).toBe(true)
+    expect(isGoalEligibleForRetentionCleanup(recurring, NOW)).toBe(true)
+  })
+})
+
+describe('isGoalEligibleForRetentionCleanup — archived goals', () => {
+  it('follows the same 2-year rule, keyed off completion date when completed', () => {
+    const goal = makeGoal({ archived: true, completed: true, completedAt: new Date(2026, 5, 1).getTime() })
+    expect(isGoalEligibleForRetentionCleanup(goal, NOW)).toBe(true)
+  })
+
+  it('falls back to creation date when never completed', () => {
+    const goal = makeGoal({ archived: true, completed: false, createdAt: new Date(2026, 5, 1).getTime() })
+    expect(isGoalEligibleForRetentionCleanup(goal, NOW)).toBe(true)
   })
 })

@@ -1,12 +1,13 @@
 import { db } from '@/lib/db/db'
 import { createId } from '@/lib/id'
 import { formatDateOnly, getCurrentWeekId, getPreviousWeekId, getTodayISO, subDays, weekIdToStart } from '@/lib/date/week'
-import type { Goal, Habit, HabitCompletion, WeeklySnapshot } from '@/types/models'
+import type { Goal, Habit, HabitCompletion, RecurringDefinition, WeeklySnapshot } from '@/types/models'
 
 /**
- * Populates the local database with realistic sample data — deadline goals,
- * rolled-over goals, plain weekly goals, daily goals, daily/weekly habits
- * with streak history, and several weeks of snapshot history for
+ * Populates the local database with realistic sample data spanning every
+ * task kind — Scheduled (including a Late one), Weekly (plain and rolled
+ * over), Today Only, a Recurring definition with occurrences, daily/weekly
+ * habits with streak history, and several weeks of snapshot history for
  * Analytics. Dev-only: wired to a button that only renders when
  * import.meta.env.DEV is true (see SettingsScreen). Never runs automatically.
  */
@@ -14,12 +15,14 @@ export async function seedDevData(): Promise<void> {
   const now = Date.now()
   const currentWeekId = getCurrentWeekId()
   const todayISO = getTodayISO()
+  const yesterdayISO = formatDateOnly(subDays(new Date(), 1))
+  const twoDaysAgoISO = formatDateOnly(subDays(new Date(), 2))
 
   const goals: Goal[] = [
     {
       id: createId(),
       title: 'Submit expense report',
-      type: 'weekly',
+      kind: 'weekly',
       deadlineISO: formatDateOnly(subDays(new Date(), -1)),
       createdAt: now - 2 * 86400000,
       completedAt: null,
@@ -33,7 +36,7 @@ export async function seedDevData(): Promise<void> {
     {
       id: createId(),
       title: 'Renew car insurance',
-      type: 'weekly',
+      kind: 'weekly',
       deadlineISO: formatDateOnly(subDays(new Date(), -4)),
       createdAt: now - 5 * 86400000,
       completedAt: null,
@@ -47,7 +50,7 @@ export async function seedDevData(): Promise<void> {
     {
       id: createId(),
       title: 'Finish the Q3 planning doc',
-      type: 'weekly',
+      kind: 'weekly',
       createdAt: now - 12 * 86400000,
       completedAt: null,
       completed: false,
@@ -60,7 +63,7 @@ export async function seedDevData(): Promise<void> {
     {
       id: createId(),
       title: 'Read one chapter of a book',
-      type: 'weekly',
+      kind: 'weekly',
       createdAt: now - 1 * 86400000,
       completedAt: null,
       completed: false,
@@ -73,7 +76,7 @@ export async function seedDevData(): Promise<void> {
     {
       id: createId(),
       title: 'Deep-clean the kitchen',
-      type: 'weekly',
+      kind: 'weekly',
       createdAt: now - 3 * 86400000,
       completedAt: now - 1 * 86400000,
       completed: true,
@@ -85,28 +88,77 @@ export async function seedDevData(): Promise<void> {
     },
     {
       id: createId(),
-      title: 'Morning run',
-      type: 'daily',
-      dateISO: todayISO,
-      createdAt: now,
+      title: 'Study Monday lecture',
+      kind: 'scheduled',
+      scheduledDateISO: twoDaysAgoISO,
+      createdAt: now - 2 * 86400000,
       completedAt: null,
       completed: false,
-      originalWeekId: currentWeekId,
-      currentWeekId,
       rolledOver: false,
       rolloverCount: 0,
       archived: false,
     },
     {
       id: createId(),
-      title: 'Call the dentist',
-      type: 'daily',
-      dateISO: todayISO,
+      title: 'Finish project draft',
+      kind: 'scheduled',
+      scheduledDateISO: yesterdayISO,
+      deadlineISO: todayISO,
+      createdAt: now - 1 * 86400000,
+      completedAt: null,
+      completed: false,
+      rolledOver: false,
+      rolloverCount: 0,
+      archived: false,
+    },
+    {
+      id: createId(),
+      title: 'Call Ahmed today',
+      kind: 'today',
+      scheduledDateISO: todayISO,
+      createdAt: now,
+      completedAt: null,
+      completed: false,
+      rolledOver: false,
+      rolloverCount: 0,
+      archived: false,
+    },
+    {
+      id: createId(),
+      title: 'Pick up dry cleaning',
+      kind: 'today',
+      scheduledDateISO: todayISO,
       createdAt: now,
       completedAt: now,
       completed: true,
-      originalWeekId: currentWeekId,
-      currentWeekId,
+      rolledOver: false,
+      rolloverCount: 0,
+      archived: false,
+    },
+  ]
+
+  const recurringDefinitions: RecurringDefinition[] = [
+    {
+      id: createId(),
+      title: 'Study Tuesday lecture',
+      recurrenceType: 'weekly',
+      weekdays: [2],
+      active: true,
+      createdAt: now - 21 * 86400000,
+      lastGeneratedThroughISO: todayISO,
+    },
+  ]
+
+  const recurringOccurrences: Goal[] = [
+    {
+      id: createId(),
+      title: 'Study Tuesday lecture',
+      kind: 'recurring',
+      scheduledDateISO: yesterdayISO,
+      recurringDefinitionId: recurringDefinitions[0].id,
+      createdAt: now - 1 * 86400000,
+      completedAt: null,
+      completed: false,
       rolledOver: false,
       rolloverCount: 0,
       archived: false,
@@ -152,33 +204,47 @@ export async function seedDevData(): Promise<void> {
     const targetPct = completionPcts[completionPcts.length - 1 - i]
     const planned = 5
     const completed = Math.round((planned * targetPct) / 100)
-    // Derive the displayed percentage from the actual completed/planned counts
-    // rather than reusing targetPct directly — rounding `completed` means the
-    // two can otherwise disagree (e.g. 2/5 stored as "45%" instead of 40%).
-    const completionPct = Math.round((completed / planned) * 100)
     const start = weekIdToStart(snapWeek)
     snapshots.push({
       weekId: snapWeek,
       weekStart: start.getTime(),
       weekEnd: start.getTime() + 6 * 86400000,
-      totalPlanned: planned,
-      completed,
-      notCompleted: planned - completed,
-      completionPct,
-      rolledOver: planned - completed,
-      withDeadline: 2,
-      completedBeforeDeadline: 1,
-      completedAfterDeadline: Math.max(0, completed - 1),
-      dailyGoalsPlanned: 3,
-      dailyGoalsCompleted: 2,
+      weeklyPlanned: planned,
+      weeklyCompleted: completed,
+      weeklyRolledOver: planned - completed,
+      weeklyCompletionPct: Math.round((completed / planned) * 100),
+      scheduledPlanned: 3,
+      scheduledCompleted: 2,
+      scheduledCompletedLate: 1,
+      scheduledLateDaysSum: 2,
+      todayOnlyPlanned: 3,
+      todayOnlyCompleted: 2,
+      todayOnlyMissed: 1,
+      recurringPlanned: 1,
+      recurringCompleted: 1,
+      recurringCompletedLate: 0,
+      recurringLateDaysSum: 0,
+      deadlinesDue: 2,
+      deadlinesMetOnTime: 1,
+      deadlinesMetLate: Math.max(0, completed - 1),
+      deadlinesMissed: 0,
       createdAt: start.getTime() + 7 * 86400000,
     })
   }
 
-  await db.transaction('rw', db.goals, db.habits, db.habitCompletions, db.weeklySnapshots, async () => {
-    await db.goals.bulkAdd(goals)
-    await db.habits.bulkAdd(habits)
-    await db.habitCompletions.bulkAdd(completions)
-    await db.weeklySnapshots.bulkAdd(snapshots)
-  })
+  await db.transaction(
+    'rw',
+    db.goals,
+    db.recurringDefinitions,
+    db.habits,
+    db.habitCompletions,
+    db.weeklySnapshots,
+    async () => {
+      await db.goals.bulkAdd([...goals, ...recurringOccurrences])
+      await db.recurringDefinitions.bulkAdd(recurringDefinitions)
+      await db.habits.bulkAdd(habits)
+      await db.habitCompletions.bulkAdd(completions)
+      await db.weeklySnapshots.bulkAdd(snapshots)
+    },
+  )
 }

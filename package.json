@@ -2,7 +2,7 @@
   "name": "momentum",
   "description": "A calm, offline-first PWA for weekly/daily goals and habit tracking, with a custom Saturday–Friday planning week.",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "author": "Omar Issam",
   "license": "MIT",

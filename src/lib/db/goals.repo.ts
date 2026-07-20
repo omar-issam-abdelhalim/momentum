@@ -1,33 +1,34 @@
 import { db } from './db'
 import { createId } from '@/lib/id'
 import { getCurrentWeekId } from '@/lib/date/week'
-import type { Goal, GoalType, Priority } from '@/types/models'
+import type { Goal, GoalKind, Priority } from '@/types/models'
 
 export interface CreateGoalInput {
   title: string
   description?: string
-  type: GoalType
-  dateISO?: string
+  kind: GoalKind
+  /** Required for 'scheduled' and 'today'; ignored for 'weekly' and 'recurring' (set by the recurrence engine). */
+  scheduledDateISO?: string
   deadlineISO?: string
   priority?: Priority
 }
 
 export async function createGoal(input: CreateGoalInput): Promise<Goal> {
   const now = Date.now()
-  const weekId = getCurrentWeekId()
+  const isWeekly = input.kind === 'weekly'
   const goal: Goal = {
     id: createId(),
     title: input.title.trim(),
     description: input.description?.trim() || undefined,
-    type: input.type,
-    dateISO: input.type === 'daily' ? input.dateISO : undefined,
+    kind: input.kind,
+    scheduledDateISO: isWeekly ? undefined : input.scheduledDateISO,
     deadlineISO: input.deadlineISO || undefined,
     priority: input.priority,
     createdAt: now,
     completedAt: null,
     completed: false,
-    originalWeekId: weekId,
-    currentWeekId: weekId,
+    originalWeekId: isWeekly ? getCurrentWeekId() : undefined,
+    currentWeekId: isWeekly ? getCurrentWeekId() : undefined,
     rolledOver: false,
     rolloverCount: 0,
     archived: false,
@@ -39,8 +40,7 @@ export async function createGoal(input: CreateGoalInput): Promise<Goal> {
 export interface UpdateGoalInput {
   title?: string
   description?: string
-  type?: GoalType
-  dateISO?: string
+  scheduledDateISO?: string
   deadlineISO?: string | null
   priority?: Priority
 }
@@ -49,8 +49,7 @@ export async function updateGoal(id: string, input: UpdateGoalInput): Promise<vo
   const patch: Partial<Goal> = {}
   if (input.title !== undefined) patch.title = input.title.trim()
   if (input.description !== undefined) patch.description = input.description.trim() || undefined
-  if (input.type !== undefined) patch.type = input.type
-  if (input.dateISO !== undefined) patch.dateISO = input.dateISO
+  if (input.scheduledDateISO !== undefined) patch.scheduledDateISO = input.scheduledDateISO
   if (input.deadlineISO !== undefined) patch.deadlineISO = input.deadlineISO ?? undefined
   if (input.priority !== undefined) patch.priority = input.priority
   await db.goals.update(id, patch)
@@ -87,6 +86,6 @@ export async function getGoalsForWeek(weekId: string): Promise<Goal[]> {
 }
 
 export async function getGoalsForDate(dateISO: string): Promise<Goal[]> {
-  const goals = await db.goals.where('dateISO').equals(dateISO).toArray()
+  const goals = await db.goals.where('scheduledDateISO').equals(dateISO).toArray()
   return goals.filter((g) => !g.archived)
 }

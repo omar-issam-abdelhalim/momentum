@@ -1,44 +1,63 @@
 import type { Goal } from '@/types/models'
-import { getEndOfDay, parseDateOnly } from '@/lib/date/week'
-
-export const CLEANUP_RETENTION_DAYS = 14
+import { parseDateOnly } from '@/lib/date/week'
 
 /**
- * A detailed goal record may be removed once it's no longer operationally
- * necessary AND has been retained for at least `retentionDays`. Its
- * contribution to long-term stats has already been folded into a
+ * Detailed Goal records are retained for a deterministic ~2 calendar-year
+ * window: a record "belonging to" year Y remains available throughout Y and
+ * Y+1, and becomes eligible for purge once the current year is Y+2 or later
+ * (e.g. a 2026 record is purged once 2028 begins). Its contribution to
+ * long-term Analytics has already been folded permanently into a
  * WeeklySnapshot by then (snapshots are created when a week closes, which —
- * by construction — happens well within the retention window).
+ * by construction — happens well within this window).
  *
  * Safety rules, in order:
- *   - Incomplete weekly goals are NEVER eligible: rollover keeps them
- *     perpetually attached to the current week until completed or archived,
- *     so an "old, incomplete, still-weekly" goal should not exist, and if it
- *     somehow does, it's still the live state for that goal.
- *   - Completed weekly goals: eligible `retentionDays` after completion.
- *   - Completed daily goals: eligible `retentionDays` after completion.
- *   - Incomplete daily goals: eligible `retentionDays` after their day ended
- *     (the day has passed; there's nothing left to act on).
+ *   - Incomplete Scheduled / Recurring / Weekly goals are NEVER eligible:
+ *     they stay perpetually active (possibly "Late") until completed,
+ *     rolled over, or manually deleted — an "old, incomplete" one is still
+ *     the live state for that task.
+ *   - Incomplete Today Only tasks ARE eligible once their assigned day is
+ *     more than `retentionYears` calendar years in the past — they stop
+ *     being actionable the moment their day ends, so there is nothing left
+ *     to preserve beyond the retention window.
+ *   - Completed goals of any kind: eligible once `retentionYears` calendar
+ *     years have passed since completion.
+ *   - Archived goals: eligible on the same schedule, keyed off completion
+ *     date if completed, otherwise creation date.
  */
-export function isGoalEligibleForCleanup(goal: Goal, now: number, retentionDays = CLEANUP_RETENTION_DAYS): boolean {
-  const thresholdMs = retentionDays * 24 * 60 * 60 * 1000
+export const RETENTION_YEARS = 2
 
-  if (goal.type === 'weekly') {
-    if (!goal.completed || !goal.completedAt) return false
-    return now - goal.completedAt >= thresholdMs
+function yearOf(ms: number): number {
+  return new Date(ms).getFullYear()
+}
+
+export function isGoalEligibleForRetentionCleanup(goal: Goal, now: number, retentionYears = RETENTION_YEARS): boolean {
+  const currentYear = yearOf(now)
+
+  if (goal.archived) {
+    const recordYear = goal.completed && goal.completedAt ? yearOf(goal.completedAt) : yearOf(goal.createdAt)
+    return currentYear - recordYear >= retentionYears
   }
 
-  // Daily goal.
-  if (goal.completed && goal.completedAt) {
-    return now - goal.completedAt >= thresholdMs
+  if (goal.completed) {
+    if (!goal.completedAt) return false
+    return currentYear - yearOf(goal.completedAt) >= retentionYears
   }
-  if (goal.dateISO) {
-    const dayEnd = getEndOfDay(parseDateOnly(goal.dateISO)).getTime()
-    return now - dayEnd >= thresholdMs
+
+  if (goal.kind === 'today') {
+    if (!goal.scheduledDateISO) return false
+    const recordYear = parseDateOnly(goal.scheduledDateISO).getFullYear()
+    return currentYear - recordYear >= retentionYears
   }
+
+  // Incomplete scheduled / recurring / weekly goals: always potentially
+  // active or Late — never eligible for retention cleanup.
   return false
 }
 
-export function getGoalsEligibleForCleanup(goals: Goal[], now: number, retentionDays = CLEANUP_RETENTION_DAYS): Goal[] {
-  return goals.filter((g) => isGoalEligibleForCleanup(g, now, retentionDays))
+export function getGoalsEligibleForRetentionCleanup(
+  goals: Goal[],
+  now: number,
+  retentionYears = RETENTION_YEARS,
+): Goal[] {
+  return goals.filter((g) => isGoalEligibleForRetentionCleanup(g, now, retentionYears))
 }

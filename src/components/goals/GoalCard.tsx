@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { Check, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, Clock, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import type { Goal } from '@/types/models'
 import { getDeadlineUrgency, URGENCY_LABEL } from '@/lib/logic/deadline'
+import { isLate, lateDays } from '@/lib/logic/goalKind'
 import { formatShortDate } from '@/lib/date/format'
+import { getTodayISO } from '@/lib/date/week'
 import { ActionSheet } from '@/components/ui/ActionSheet'
 
 interface GoalCardProps {
@@ -19,9 +21,19 @@ const urgencyStyles: Record<string, string> = {
   upcoming: 'bg-surface-sunken text-ink-muted',
 }
 
+const KIND_LABEL: Record<Goal['kind'], string> = {
+  scheduled: 'Scheduled',
+  weekly: 'Weekly',
+  today: 'Today only',
+  recurring: 'Recurring',
+}
+
 export function GoalCard({ goal, onToggleComplete, onEdit, onDelete }: GoalCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const urgency = getDeadlineUrgency(goal.deadlineISO)
+  const todayISO = getTodayISO()
+  const urgency = getDeadlineUrgency(goal.deadlineISO, todayISO)
+  const late = isLate(goal, todayISO)
+  const daysLate = late ? lateDays(goal, todayISO) : 0
 
   return (
     <div
@@ -47,8 +59,15 @@ export function GoalCard({ goal, onToggleComplete, onEdit, onDelete }: GoalCardP
 
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-medium text-ink-muted">
-            {goal.type === 'daily' ? 'Daily' : 'Weekly'}
+            {KIND_LABEL[goal.kind]}
           </span>
+
+          {late && !goal.completed && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger">
+              <Clock size={10} aria-hidden="true" />
+              Late{daysLate > 0 ? ` · ${daysLate}d` : ''}
+            </span>
+          )}
 
           {urgency !== 'none' && (
             <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${urgencyStyles[urgency]}`}>
@@ -59,7 +78,7 @@ export function GoalCard({ goal, onToggleComplete, onEdit, onDelete }: GoalCardP
             </span>
           )}
 
-          {goal.rolledOver && !goal.completed && (
+          {goal.kind === 'weekly' && goal.rolledOver && !goal.completed && (
             <span className="inline-flex items-center gap-1 rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-medium text-ink-muted">
               <RotateCcw size={10} aria-hidden="true" />
               Rolled over{goal.rolloverCount > 1 ? ` ×${goal.rolloverCount}` : ''}

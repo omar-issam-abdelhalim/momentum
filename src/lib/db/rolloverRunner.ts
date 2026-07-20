@@ -1,5 +1,6 @@
 import { db } from './db'
 import { getSettings } from './settings.repo'
+import { gatherSnapshotPool } from './snapshotPool'
 import { getCurrentWeekId, getWeekIdsBetweenExclusiveStart, isNewWeek } from '@/lib/date/week'
 import { applyRollover, buildWeeklySnapshot, getGoalsToRollover } from '@/lib/logic/rollover'
 
@@ -12,7 +13,7 @@ export interface RolloverResult {
  * Runs at app startup. Detects every custom week that closed since the app
  * was last opened (there may be more than one if the app was closed for a
  * while) and, for each in chronological order:
- *   1. Snapshots that week's planned/completed goal counts.
+ *   1. Snapshots that week's aggregate stats across every task kind.
  *   2. Moves its incomplete weekly goals forward into the next week.
  *
  * Idempotent: a week is only processed if it doesn't already have a
@@ -50,9 +51,10 @@ export async function runWeeklyRollover(): Promise<RolloverResult> {
       continue
     }
 
-    const goalsInWeek = await db.goals.where('currentWeekId').equals(closingWeekId).toArray()
-    const snapshot = buildWeeklySnapshot(closingWeekId, goalsInWeek)
-    const toRoll = getGoalsToRollover(goalsInWeek).map((g) => applyRollover(g, nextWeekId))
+    const pool = await gatherSnapshotPool(closingWeekId)
+    const snapshot = buildWeeklySnapshot(closingWeekId, pool)
+    const weeklyInClosingWeek = pool.filter((g) => g.kind === 'weekly' && g.currentWeekId === closingWeekId)
+    const toRoll = getGoalsToRollover(weeklyInClosingWeek).map((g) => applyRollover(g, nextWeekId))
 
     await db.transaction('rw', db.goals, db.weeklySnapshots, async () => {
       await db.weeklySnapshots.put(snapshot)

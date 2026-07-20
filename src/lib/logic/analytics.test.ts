@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  averageCompletionRate,
-  averageRolloverRate,
+  aggregateSnapshots,
+  filterSnapshotsInRange,
   generatePlanningInsights,
   habitCompletionRate,
   weeklyCompletionSeries,
@@ -14,57 +14,93 @@ function makeSnapshot(overrides: Partial<WeeklySnapshot>): WeeklySnapshot {
     weekId: '2026-07-18',
     weekStart: 0,
     weekEnd: 0,
-    totalPlanned: 4,
-    completed: 2,
-    notCompleted: 2,
-    completionPct: 50,
-    rolledOver: 2,
-    withDeadline: 0,
-    completedBeforeDeadline: 0,
-    completedAfterDeadline: 0,
-    dailyGoalsPlanned: 0,
-    dailyGoalsCompleted: 0,
+    weeklyPlanned: 4,
+    weeklyCompleted: 2,
+    weeklyRolledOver: 2,
+    weeklyCompletionPct: 50,
+    scheduledPlanned: 0,
+    scheduledCompleted: 0,
+    scheduledCompletedLate: 0,
+    scheduledLateDaysSum: 0,
+    todayOnlyPlanned: 0,
+    todayOnlyCompleted: 0,
+    todayOnlyMissed: 0,
+    recurringPlanned: 0,
+    recurringCompleted: 0,
+    recurringCompletedLate: 0,
+    recurringLateDaysSum: 0,
+    deadlinesDue: 0,
+    deadlinesMetOnTime: 0,
+    deadlinesMetLate: 0,
+    deadlinesMissed: 0,
     createdAt: 0,
     ...overrides,
   }
 }
 
 describe('weeklyCompletionSeries', () => {
-  it('sorts chronologically and maps to chart points', () => {
-    const s1 = makeSnapshot({ weekId: '2026-07-25', weekStart: 2, completionPct: 80 })
-    const s2 = makeSnapshot({ weekId: '2026-07-18', weekStart: 1, completionPct: 60 })
+  it('sorts chronologically and combines every kind into one completion figure', () => {
+    const s1 = makeSnapshot({ weekId: '2026-07-25', weekStart: 2, weeklyPlanned: 5, weeklyCompleted: 4 })
+    const s2 = makeSnapshot({ weekId: '2026-07-18', weekStart: 1, weeklyPlanned: 5, weeklyCompleted: 3 })
     const series = weeklyCompletionSeries([s1, s2])
     expect(series.map((p) => p.weekId)).toEqual(['2026-07-18', '2026-07-25'])
     expect(series[0].completionPct).toBe(60)
+    expect(series[1].completionPct).toBe(80)
   })
 })
 
-describe('averageCompletionRate', () => {
-  it('averages across weeks that had planned goals', () => {
-    const snapshots = [makeSnapshot({ completionPct: 80 }), makeSnapshot({ completionPct: 40 })]
-    expect(averageCompletionRate(snapshots)).toBe(60)
+describe('filterSnapshotsInRange', () => {
+  const s1 = makeSnapshot({ weekId: 'a', weekStart: 100 })
+  const s2 = makeSnapshot({ weekId: 'b', weekStart: 200 })
+  const s3 = makeSnapshot({ weekId: 'c', weekStart: 300 })
+
+  it('returns everything when bounds are null (All time)', () => {
+    expect(filterSnapshotsInRange([s1, s2, s3], { label: 'All', startMs: null, endMs: null })).toHaveLength(3)
   })
 
-  it('ignores weeks with nothing planned', () => {
-    const snapshots = [
-      makeSnapshot({ completionPct: 100, totalPlanned: 2 }),
-      makeSnapshot({ completionPct: 0, totalPlanned: 0 }),
-    ]
-    expect(averageCompletionRate(snapshots)).toBe(100)
-  })
-
-  it('returns null with no data', () => {
-    expect(averageCompletionRate([])).toBeNull()
+  it('filters by weekStart falling within the bounds', () => {
+    const result = filterSnapshotsInRange([s1, s2, s3], { label: 'Range', startMs: 150, endMs: 250 })
+    expect(result.map((s) => s.weekId)).toEqual(['b'])
   })
 })
 
-describe('averageRolloverRate', () => {
-  it('computes the mean rollover ratio as a percentage', () => {
+describe('aggregateSnapshots', () => {
+  it('sums every counter across the given snapshots', () => {
     const snapshots = [
-      makeSnapshot({ totalPlanned: 4, rolledOver: 2 }), // 50%
-      makeSnapshot({ totalPlanned: 4, rolledOver: 0 }), // 0%
+      makeSnapshot({ weeklyPlanned: 4, weeklyCompleted: 2, weeklyRolledOver: 2 }),
+      makeSnapshot({ weeklyPlanned: 4, weeklyCompleted: 4, weeklyRolledOver: 0 }),
     ]
-    expect(averageRolloverRate(snapshots)).toBe(25)
+    const stats = aggregateSnapshots(snapshots)
+    expect(stats.weeklyPlanned).toBe(8)
+    expect(stats.weeklyCompleted).toBe(6)
+    expect(stats.weeklyCompletionPct).toBe(75)
+    expect(stats.rolloverRatePct).toBe(25)
+  })
+
+  it('returns null rates rather than fabricating them when nothing was planned', () => {
+    const stats = aggregateSnapshots([makeSnapshot({ weeklyPlanned: 0, weeklyCompleted: 0 })])
+    expect(stats.weeklyCompletionPct).toBeNull()
+    expect(stats.overallCompletionPct).toBeNull()
+  })
+
+  it('computes average lateness from the days-late sums', () => {
+    const snapshots = [
+      makeSnapshot({ scheduledCompletedLate: 2, scheduledLateDaysSum: 5 }),
+      makeSnapshot({ recurringCompletedLate: 1, recurringLateDaysSum: 3 }),
+    ]
+    const stats = aggregateSnapshots(snapshots)
+    // (5 + 3) days / (2 + 1) late items = 2.7
+    expect(stats.averageLatenessDays).toBe(2.7)
+  })
+
+  it('returns null average lateness when nothing was ever late', () => {
+    const stats = aggregateSnapshots([makeSnapshot({})])
+    expect(stats.averageLatenessDays).toBeNull()
+  })
+
+  it('tracks overdue deadline count from deadlinesMissed', () => {
+    const stats = aggregateSnapshots([makeSnapshot({ deadlinesDue: 3, deadlinesMetOnTime: 1, deadlinesMissed: 2 })])
+    expect(stats.overdueDeadlineCount).toBe(2)
   })
 })
 
@@ -75,8 +111,8 @@ describe('generatePlanningInsights', () => {
 
   it('flags low completion as an overplanning observation', () => {
     const snapshots = [
-      makeSnapshot({ weekId: '2026-07-18', weekStart: 1, completionPct: 30, totalPlanned: 5, rolledOver: 1 }),
-      makeSnapshot({ weekId: '2026-07-25', weekStart: 2, completionPct: 20, totalPlanned: 5, rolledOver: 1 }),
+      makeSnapshot({ weekId: '2026-07-18', weekStart: 1, weeklyPlanned: 5, weeklyCompleted: 1, weeklyRolledOver: 1 }),
+      makeSnapshot({ weekId: '2026-07-25', weekStart: 2, weeklyPlanned: 5, weeklyCompleted: 1, weeklyRolledOver: 1 }),
     ]
     const insights = generatePlanningInsights(snapshots)
     expect(insights.some((i) => i.id === 'completion-low')).toBe(true)
@@ -84,8 +120,8 @@ describe('generatePlanningInsights', () => {
 
   it('praises consistently high completion', () => {
     const snapshots = [
-      makeSnapshot({ weekId: '2026-07-18', weekStart: 1, completionPct: 90, totalPlanned: 5, rolledOver: 0 }),
-      makeSnapshot({ weekId: '2026-07-25', weekStart: 2, completionPct: 95, totalPlanned: 5, rolledOver: 0 }),
+      makeSnapshot({ weekId: '2026-07-18', weekStart: 1, weeklyPlanned: 5, weeklyCompleted: 5, weeklyRolledOver: 0 }),
+      makeSnapshot({ weekId: '2026-07-25', weekStart: 2, weeklyPlanned: 5, weeklyCompleted: 5, weeklyRolledOver: 0 }),
     ]
     const insights = generatePlanningInsights(snapshots)
     expect(insights.some((i) => i.id === 'completion-high')).toBe(true)
@@ -94,8 +130,8 @@ describe('generatePlanningInsights', () => {
 
   it('adds a rollover observation when rollover rate is high', () => {
     const snapshots = [
-      makeSnapshot({ weekId: '2026-07-18', weekStart: 1, completionPct: 60, totalPlanned: 5, rolledOver: 3 }),
-      makeSnapshot({ weekId: '2026-07-25', weekStart: 2, completionPct: 65, totalPlanned: 5, rolledOver: 3 }),
+      makeSnapshot({ weekId: '2026-07-18', weekStart: 1, weeklyPlanned: 5, weeklyCompleted: 3, weeklyRolledOver: 3 }),
+      makeSnapshot({ weekId: '2026-07-25', weekStart: 2, weeklyPlanned: 5, weeklyCompleted: 3, weeklyRolledOver: 3 }),
     ]
     const insights = generatePlanningInsights(snapshots)
     expect(insights.some((i) => i.id === 'rollover-high')).toBe(true)
@@ -103,8 +139,8 @@ describe('generatePlanningInsights', () => {
 
   it('never emits medical/psychological language', () => {
     const snapshots = [
-      makeSnapshot({ weekId: '2026-07-18', weekStart: 1, completionPct: 10, totalPlanned: 5 }),
-      makeSnapshot({ weekId: '2026-07-25', weekStart: 2, completionPct: 5, totalPlanned: 5 }),
+      makeSnapshot({ weekId: '2026-07-18', weekStart: 1, weeklyPlanned: 5, weeklyCompleted: 1 }),
+      makeSnapshot({ weekId: '2026-07-25', weekStart: 2, weeklyPlanned: 5, weeklyCompleted: 0 }),
     ]
     const insights = generatePlanningInsights(snapshots)
     const banned = /disorder|diagnos|anxiety|adhd|procrastinat/i

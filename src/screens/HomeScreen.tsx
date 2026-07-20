@@ -20,6 +20,7 @@ import {
   uncompleteGoal,
   updateGoal,
 } from '@/lib/db/goals.repo'
+import { createRecurringDefinition } from '@/lib/db/recurring.repo'
 import { createHabit, deleteHabit as deleteHabitRepo, toggleHabitCompletion, updateHabit } from '@/lib/db/habits.repo'
 import type { Goal } from '@/types/models'
 
@@ -37,7 +38,7 @@ export function HomeScreen() {
   const [deletingHabit, setDeletingHabit] = useState<HabitWithState | null>(null)
   const [showCompleted, setShowCompleted] = useState(false)
 
-  const weeklyGoals = [...activeGoals, ...completedGoals].filter((g) => g.type === 'weekly')
+  const weeklyGoals = [...activeGoals, ...completedGoals].filter((g) => g.kind === 'weekly')
   const weeklyCompleted = weeklyGoals.filter((g) => g.completed).length
   const weeklyProgress = weeklyGoals.length === 0 ? 0 : Math.round((weeklyCompleted / weeklyGoals.length) * 100)
 
@@ -62,20 +63,27 @@ export function HomeScreen() {
       await updateGoal(editingGoal.id, {
         title: values.title,
         description: values.description,
-        type: values.type,
-        dateISO: values.type === 'daily' ? values.dateISO : undefined,
+        scheduledDateISO: editingGoal.kind === 'weekly' ? undefined : values.scheduledDateISO,
         deadlineISO: values.deadlineISO || null,
       })
-      showToast('Goal updated')
+      showToast('Updated')
+    } else if (values.kind === 'recurring') {
+      await createRecurringDefinition({
+        title: values.title,
+        description: values.description,
+        recurrenceType: values.recurrenceType,
+        weekdays: values.weekdays,
+      })
+      showToast('Recurring task added')
     } else {
       await createGoal({
         title: values.title,
         description: values.description,
-        type: values.type,
-        dateISO: values.type === 'daily' ? values.dateISO : undefined,
+        kind: values.kind,
+        scheduledDateISO: values.kind === 'weekly' ? undefined : values.scheduledDateISO,
         deadlineISO: values.deadlineISO || undefined,
       })
-      showToast('Goal added')
+      showToast('Added')
     }
     setGoalFormOpen(false)
     setEditingGoal(null)

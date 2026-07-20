@@ -59,15 +59,20 @@ export function SettingsScreen() {
   }
 
   const handleClearAll = async () => {
-    await db.transaction('rw', db.goals, db.habits, db.habitCompletions, db.weeklySnapshots, db.settings, async () => {
-      await Promise.all([
-        db.goals.clear(),
-        db.habits.clear(),
-        db.habitCompletions.clear(),
-        db.weeklySnapshots.clear(),
-        db.settings.clear(),
-      ])
-    })
+    await db.transaction(
+      'rw',
+      [db.goals, db.recurringDefinitions, db.habits, db.habitCompletions, db.weeklySnapshots, db.settings],
+      async () => {
+        await Promise.all([
+          db.goals.clear(),
+          db.recurringDefinitions.clear(),
+          db.habits.clear(),
+          db.habitCompletions.clear(),
+          db.weeklySnapshots.clear(),
+          db.settings.clear(),
+        ])
+      },
+    )
     setConfirmClearOpen(false)
     showToast('All data cleared')
     window.location.reload()
