@@ -165,11 +165,95 @@ export async function seedDevData(): Promise<void> {
     },
   ]
 
+  const waterCreatedAt = now - 20 * 86400000
+  const readCreatedAt = now - 20 * 86400000
+  const meditateCreatedAt = now - 20 * 86400000
+  const weeklyReviewCreatedAt = now - 40 * 86400000
+  const gymCreatedAt = now - 30 * 86400000
+  const journalCreatedAt = now - 45 * 86400000
+  const journalPausedAt = now - 5 * 86400000
+  const stretchCreatedAt = now - 60 * 86400000
+  const stretchPausedAt = now - 40 * 86400000
+  const stretchResumedAt = now - 20 * 86400000
+
   const habits: Habit[] = [
-    { id: createId(), name: 'Drink water', frequency: 'daily', icon: 'droplet', order: 0, active: true, createdAt: now - 20 * 86400000 },
-    { id: createId(), name: 'Read', frequency: 'daily', icon: 'book', order: 1, active: true, createdAt: now - 20 * 86400000 },
-    { id: createId(), name: 'Meditate', frequency: 'daily', icon: 'brain', order: 2, active: true, createdAt: now - 20 * 86400000 },
-    { id: createId(), name: 'Weekly review', frequency: 'weekly', icon: 'pen', order: 3, active: true, createdAt: now - 40 * 86400000 },
+    {
+      id: createId(),
+      name: 'Drink water',
+      frequency: 'daily',
+      icon: 'droplet',
+      order: 0,
+      status: 'active',
+      epochs: [{ id: createId(), startDate: waterCreatedAt, endDate: null }],
+      createdAt: waterCreatedAt,
+    },
+    {
+      id: createId(),
+      name: 'Read',
+      frequency: 'daily',
+      icon: 'book',
+      order: 1,
+      status: 'active',
+      epochs: [{ id: createId(), startDate: readCreatedAt, endDate: null }],
+      createdAt: readCreatedAt,
+    },
+    {
+      id: createId(),
+      name: 'Meditate',
+      frequency: 'daily',
+      icon: 'brain',
+      order: 2,
+      status: 'active',
+      epochs: [{ id: createId(), startDate: meditateCreatedAt, endDate: null }],
+      createdAt: meditateCreatedAt,
+    },
+    {
+      id: createId(),
+      name: 'Weekly review',
+      frequency: 'weekly',
+      icon: 'pen',
+      order: 3,
+      status: 'active',
+      epochs: [{ id: createId(), startDate: weeklyReviewCreatedAt, endDate: null }],
+      createdAt: weeklyReviewCreatedAt,
+    },
+    // Weekday-restricted habit — exercises the "not scheduled" grid state on Tue/Thu/weekends.
+    {
+      id: createId(),
+      name: 'Gym',
+      frequency: 'daily',
+      weekdays: [1, 3, 5],
+      icon: 'dumbbell',
+      order: 4,
+      status: 'active',
+      epochs: [{ id: createId(), startDate: gymCreatedAt, endDate: null }],
+      createdAt: gymCreatedAt,
+    },
+    // Paused habit — exercises the Paused segment and a frozen closed epoch.
+    {
+      id: createId(),
+      name: 'Journal',
+      frequency: 'daily',
+      icon: 'pen',
+      order: 5,
+      status: 'paused',
+      epochs: [{ id: createId(), startDate: journalCreatedAt, endDate: journalPausedAt }],
+      createdAt: journalCreatedAt,
+    },
+    // Multi-epoch habit (paused then resumed) — exercises Epoch Selector/History with 2+ epochs.
+    {
+      id: createId(),
+      name: 'Stretch',
+      frequency: 'daily',
+      icon: 'sparkles',
+      order: 6,
+      status: 'active',
+      epochs: [
+        { id: createId(), startDate: stretchCreatedAt, endDate: stretchPausedAt },
+        { id: createId(), startDate: stretchResumedAt, endDate: null },
+      ],
+      createdAt: stretchCreatedAt,
+    },
   ]
 
   const completions: HabitCompletion[] = []
@@ -194,6 +278,38 @@ export async function seedDevData(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     weekCursor = getPreviousWeekId(weekCursor)
     completions.push({ id: createId(), habitId: habits[3].id, periodId: weekCursor, completedAt: weekIdToStart(weekCursor).getTime() })
+  }
+
+  // Gym (habits[4]): a few completions on its actual Mon/Wed/Fri due days over the last couple of weeks.
+  const gymHabit = habits[4]
+  for (let i = 1; i <= 14; i++) {
+    const date = subDays(new Date(), i)
+    const weekday = date.getDay()
+    if ([1, 3, 5].includes(weekday) && i !== 3) {
+      completions.push({ id: createId(), habitId: gymHabit.id, periodId: formatDateOnly(date), completedAt: now - i * 86400000 })
+    }
+  }
+
+  // Journal (habits[5]): completions within its now-closed epoch only (never after journalPausedAt).
+  const journalHabit = habits[5]
+  for (let i = 6; i <= 10; i++) {
+    completions.push({
+      id: createId(),
+      habitId: journalHabit.id,
+      periodId: formatDateOnly(subDays(new Date(), i)),
+      completedAt: now - i * 86400000,
+    })
+  }
+
+  // Stretch (habits[6]): a few completions in its current (second) open epoch only.
+  const stretchHabit = habits[6]
+  for (let i = 1; i <= 5; i++) {
+    completions.push({
+      id: createId(),
+      habitId: stretchHabit.id,
+      periodId: formatDateOnly(subDays(new Date(), i)),
+      completedAt: now - i * 86400000,
+    })
   }
 
   const snapshots: WeeklySnapshot[] = []

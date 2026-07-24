@@ -1,7 +1,8 @@
 import type { Habit, HabitCompletion, WeeklySnapshot } from '@/types/models'
-import { formatWeekRangeLabel } from '@/lib/date/week'
+import { formatDateOnly, formatWeekRangeLabel, getWeekId } from '@/lib/date/week'
 import type { ResolvedRange } from '@/lib/date/ranges'
-import { computeHabitStreak } from './streaks'
+import { computeEpochStats, getOpenEpoch } from './epochs'
+import { isHabitDueOnDate } from './habitSchedule'
 
 /** Snapshots whose selected range overlaps [startMs, endMs] (attributed by weekStart — see lib/date/ranges.ts). `range.startMs === null` (All time) matches everything. */
 export function filterSnapshotsInRange(snapshots: WeeklySnapshot[], range: ResolvedRange): WeeklySnapshot[] {
@@ -228,24 +229,58 @@ export interface HabitAnalyticsSummary {
   bestStreak: number
 }
 
-/** Completion rate over a trailing window of periods (days for daily habits, weeks for weekly habits). */
+export interface HabitCompletionRateOptions {
+  /** Periods older than this (exclusive) are skipped entirely — used to stop the trailing window from crossing before the currently open epoch's start (a prior pause), or from padding in phantom misses before the habit existed. */
+  earliestPeriodId?: string
+  /** Periods this predicate rejects are skipped entirely, from both the numerator and the denominator — used so a weekday-restricted habit's non-scheduled days are never counted as misses. Defaults to "every period is due" (the original, unrestricted behavior). */
+  isDue?: (periodId: string) => boolean
+}
+
+/**
+ * Completion rate over a trailing window of `windowSize` *due* periods (days
+ * for daily habits, weeks for weekly habits) — walking further back through
+ * any skipped (not-due, or before `earliestPeriodId`) periods as needed so
+ * the window still covers `windowSize` real opportunities. With no options,
+ * behaves identically to the original fixed-window calendar walk.
+ */
 export function habitCompletionRate(
   habit: Habit,
   completions: HabitCompletion[],
   windowSize: number,
   currentPeriodId: string,
   getPreviousPeriodId: (id: string) => string,
+  options?: HabitCompletionRateOptions,
 ): number {
+  const isDue = options?.isDue ?? (() => true)
+  const earliestPeriodId = options?.earliestPeriodId
   const completedSet = new Set(completions.filter((c) => c.habitId === habit.id).map((c) => c.periodId))
+
   let cursor = currentPeriodId
   let hits = 0
-  for (let i = 0; i < windowSize; i++) {
-    if (completedSet.has(cursor)) hits++
+  let counted = 0
+  let guard = 0
+  const guardLimit = windowSize * 8 + 40
+  while (counted < windowSize && guard < guardLimit) {
+    guard++
+    if (earliestPeriodId !== undefined && cursor < earliestPeriodId) break
+    if (isDue(cursor)) {
+      counted++
+      if (completedSet.has(cursor)) hits++
+    }
     cursor = getPreviousPeriodId(cursor)
   }
-  return Math.round((hits / windowSize) * 100)
+  return counted === 0 ? 0 : Math.round((hits / counted) * 100)
 }
 
+/**
+ * Habits passed in are assumed active-status (the caller filters — see
+ * AnalyticsScreen). Streaks are bounded to the currently open epoch so a
+ * habit that was paused and resumed never shows a streak spanning the gap.
+ * The trailing-window completion rate is likewise bounded to the open
+ * epoch's start and, for weekday-restricted daily habits, only counts due
+ * days — never fabricating a miss for a day that was never scheduled or
+ * that predates the current epoch.
+ */
 export function summarizeHabitAnalytics(
   habits: Habit[],
   completions: HabitCompletion[],
@@ -255,18 +290,29 @@ export function summarizeHabitAnalytics(
   getPreviousWeekId: (id: string) => string,
 ): HabitAnalyticsSummary[] {
   return habits.map((habit) => {
-    const streak = computeHabitStreak(habit, completions, todayISO, currentWeekId)
+    const openEpoch = getOpenEpoch(habit)
+    const epochStats = openEpoch ? computeEpochStats(habit, openEpoch, completions, todayISO, currentWeekId) : null
+    const earliestPeriodId = openEpoch
+      ? habit.frequency === 'daily'
+        ? formatDateOnly(new Date(openEpoch.startDate))
+        : getWeekId(new Date(openEpoch.startDate))
+      : undefined
+
     const rate =
       habit.frequency === 'daily'
-        ? habitCompletionRate(habit, completions, 30, todayISO, getPreviousDayISO)
-        : habitCompletionRate(habit, completions, 12, currentWeekId, getPreviousWeekId)
+        ? habitCompletionRate(habit, completions, 30, todayISO, getPreviousDayISO, {
+            earliestPeriodId,
+            isDue: (periodId) => isHabitDueOnDate(habit, periodId),
+          })
+        : habitCompletionRate(habit, completions, 12, currentWeekId, getPreviousWeekId, { earliestPeriodId })
+
     return {
       habitId: habit.id,
       name: habit.name,
       frequency: habit.frequency,
       completionRatePct: rate,
-      currentStreak: streak.current,
-      bestStreak: streak.best,
+      currentStreak: epochStats?.currentStreak ?? 0,
+      bestStreak: epochStats?.bestStreak ?? 0,
     }
   })
 }

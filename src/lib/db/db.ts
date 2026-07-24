@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { AppSettings, Goal, Habit, HabitCompletion, RecurringDefinition, WeeklySnapshot } from '@/types/models'
+import { createId } from '@/lib/id'
 
 export class MomentumDB extends Dexie {
   goals!: EntityTable<Goal, 'id'>
@@ -108,6 +109,48 @@ export class MomentumDB extends Dexie {
             delete s.completedAfterDeadline
             delete s.dailyGoalsPlanned
             delete s.dailyGoalsCompleted
+          })
+      })
+
+    // v3: extensible habit status (active/paused, future-proofed for a later
+    // 'retired' value) + persisted habit epochs (continuous active periods
+    // bounded by pause/resume) + optional per-weekday habit scheduling.
+    //
+    // Migration mapping decision (documented, safe, non-destructive):
+    //   - v2 `active: boolean` -> v3 `status: 'active' | 'paused'`. `active`
+    //     is dropped; nothing read it except the now-superseded active/status
+    //     filters, which are updated in the same release.
+    //   - Every existing habit gets exactly one implicit epoch representing
+    //     its history to date: `startDate` = the habit's original
+    //     `createdAt`, `endDate: null` (open) if it was active, or `endDate:
+    //     createdAt` (a degenerate closed epoch) if it had been soft-
+    //     deactivated via the (UI-unreachable) deactivateHabit() path. This
+    //     produces zero visible change to currently displayed streak/stats
+    //     for any habit that was never paused, since the open epoch's start
+    //     is identical to the habit's actual creation date.
+    //   - `weekdays` is left unset for every migrated habit — daily habits
+    //     remain due every day exactly as before; weekly habits never used
+    //     this field. Nothing about existing schedules changes.
+    this.version(3)
+      .stores({
+        goals:
+          'id, kind, currentWeekId, originalWeekId, scheduledDateISO, deadlineISO, createdAt, recurringDefinitionId',
+        recurringDefinitions: 'id, active, createdAt',
+        habits: 'id, frequency, order',
+        habitCompletions: 'id, habitId, periodId, [habitId+periodId], completedAt',
+        weeklySnapshots: 'weekId, weekStart',
+        settings: 'id',
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table('habits')
+          .toCollection()
+          .modify((habit: Record<string, unknown>) => {
+            const wasActive = (habit.active as boolean) ?? true
+            const createdAt = (habit.createdAt as number) ?? Date.now()
+            habit.status = wasActive ? 'active' : 'paused'
+            habit.epochs = [{ id: createId(), startDate: createdAt, endDate: wasActive ? null : createdAt }]
+            delete habit.active
           })
       })
   }

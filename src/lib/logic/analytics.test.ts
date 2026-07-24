@@ -154,7 +154,8 @@ describe('habitCompletionRate', () => {
     name: 'Read',
     frequency: 'daily',
     order: 0,
-    active: true,
+    status: 'active',
+    epochs: [{ id: 'e1', startDate: 0, endDate: null }],
     createdAt: 0,
   }
 
@@ -172,5 +173,29 @@ describe('habitCompletionRate', () => {
 
   it('returns 0 for a habit with no completions', () => {
     expect(habitCompletionRate(habit, [], 7, '2026-07-22', previousDayISO)).toBe(0)
+  })
+
+  it('excludes periods before earliestPeriodId — never counting a pre-resume (paused) gap as a miss', () => {
+    // Only 2026-07-20 and 2026-07-21 are "in scope" (the currently open epoch started 07-20).
+    const completions: HabitCompletion[] = [{ id: 'c1', habitId: habit.id, periodId: '2026-07-21', completedAt: 0 }]
+    const rate = habitCompletionRate(habit, completions, 10, '2026-07-21', previousDayISO, {
+      earliestPeriodId: '2026-07-20',
+    })
+    // window would normally be 10 days back to 07-12, but everything before 07-20 is excluded.
+    expect(rate).toBe(50) // 1 completed / 2 in-scope days
+  })
+
+  it('skips non-due periods via isDue — a weekday-restricted habit is never penalized for its off days', () => {
+    const mwf: Habit = { ...habit, weekdays: [1, 3, 5] } // Mon/Wed/Fri
+    const isDue = (periodId: string) => [1, 3, 5].includes(new Date(`${periodId}T00:00:00`).getDay())
+    // 2026-07-24 Fri, 07-23 Thu(skip), 07-22 Wed, 07-21 Tue(skip), 07-20 Mon
+    const completions: HabitCompletion[] = ['2026-07-20', '2026-07-22', '2026-07-24'].map((periodId, i) => ({
+      id: `c${i}`,
+      habitId: mwf.id,
+      periodId,
+      completedAt: 0,
+    }))
+    const rate = habitCompletionRate(mwf, completions, 3, '2026-07-24', previousDayISO, { isDue })
+    expect(rate).toBe(100) // all 3 due days (Mon/Wed/Fri) completed; Tue/Thu never counted
   })
 })

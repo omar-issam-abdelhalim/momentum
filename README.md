@@ -69,7 +69,7 @@ To move your data to another device, or to keep a backup, use **Settings → Exp
 - [Home priority order](#home-priority-order)
 - [Completed this week](#completed-this-week)
 - [Weekly Goals & rollover](#weekly-goals--rollover)
-- [Habits & streaks](#habits--streaks)
+- [Habits, pause/resume & the Analysis screen](#habits-pauseresume--the-analysis-screen)
 - [Activity archive](#activity-archive)
 - [Data retention](#data-retention)
 - [Analytics](#analytics)
@@ -104,7 +104,7 @@ To move your data to another device, or to keep a backup, use **Settings → Exp
 - **A deliberate Home priority order** so today's plan and real urgency never fight each other — see [Home priority order](#home-priority-order).
 - **Automatic weekly rollover** for Weekly Goals — incomplete ones move into the new week on their own, without ever being duplicated.
 - **Recurring tasks** with a robust definition + independent-occurrence architecture: a missed Tuesday never blocks the next Tuesday's occurrence from being created.
-- **Daily & weekly habits** with current/best streak tracking.
+- **Daily & weekly habits** with current/best streak tracking, optional Mon/Wed/Fri-style weekday scheduling, and a full pause/resume lifecycle with an epoch-aware, day-by-day consistency grid — see [Habits, pause/resume & the Analysis screen](#habits-pauseresume--the-analysis-screen).
 - **A real Activity archive** — completed items organized by Year → Month, kept in detail for about two years.
 - **Analytics across six time ranges** — All, Week, Month, Quarter, Half-Year, Year — with navigation between periods.
 - **Backup & restore** — export everything to a single JSON file, validate and re-import it later, with automatic migration from older backup versions.
@@ -216,9 +216,29 @@ Finishing a goal or task keeps it visible in Home's collapsed **Completed** sect
 
 Weekly Goals are sorted with the priority rules above; a rolled-over Weekly Goal and its `rolloverCount` are always visible. When a week closes, any still-incomplete Weekly Goal is carried into the next week automatically the next time the app is opened. The rollover **mutates the same goal record in place** — it is never copied — so `rolloverCount` and `originalWeekId` always tell you exactly how long a goal has been outstanding, and re-running rollover (or missing several weeks in a row) can never produce duplicates. Each closed week also gets a permanent, detailed `WeeklySnapshot` — covering Weekly Goals, Scheduled Tasks, Today Only, Recurring, and deadline performance — which is what powers Analytics and Activity long after the underlying detail rows are gone.
 
-## Habits & streaks
+## Habits, pause/resume & the Analysis screen
 
-Habits are daily or weekly. Daily habits reset at local midnight; weekly habits reset every Saturday. Streaks are computed from the underlying completion events (not a counter that can drift): a streak counts consecutive completed periods ending at "now," and isn't broken just because the *current* period hasn't been completed yet — only a genuinely missed prior period breaks it.
+Habits are daily or weekly. Daily habits reset at local midnight; weekly habits reset every Saturday. A daily habit can optionally be restricted to specific weekdays (e.g. Mon/Wed/Fri) — on days it isn't due, it's simply not asked for, never silently counted as missed. Weekly habits stay "once anywhere in the custom week," with no per-day due-ness. Streaks are computed from the underlying completion events (not a counter that can drift): a streak counts consecutive completed periods ending at "now," and isn't broken just because the *current* period hasn't been completed yet — only a genuinely missed prior period breaks it.
+
+**Status is extensible.** Every habit has a `status` of `active` or `paused` — a string, not a boolean, specifically so a future third state (e.g. a "retired/graduated" habit you no longer need to track) can be added later without another breaking migration. Only Active/Paused exist today; all status changes are explicit, there's no automatic time-based transition.
+
+**Pausing** a habit (via its **···** menu) removes it from every daily-completion surface and from all streak-breaking logic — a paused habit can never be "missed." It stays reachable, one tap away, under the Habits section's **Paused** segment, and **Resume** always starts a brand-new tracking period with the streak reset to zero, never continuing the one before the pause. Unlimited pause/resume cycles are supported.
+
+**Epochs.** Each continuous active stretch of a habit — from creation or resume, to the next pause (or "now," if still active) — is a persisted **epoch** with an explicit start/end date. Closed epochs are historically stable: opening one later always shows the same numbers. Epoch statistics (completion rate, streaks, totals) are **derived**, not stored as a snapshot — they're computed on demand from the habit's own (immutable, never-pruned) completion history, bounded to that epoch's date range and its actual schedule. This avoids duplicated state and self-corrects if a stats formula is ever refined later.
+
+**The Analysis screen** (**···** → **Analysis** on any habit) shows, top to bottom: a header with current status; Quick Stats (current streak, best streak, completion rate) for whichever epoch is selected; an Epoch Selector chip row (**Now**, plus every closed epoch, most recent first); a day-by-day **Visual Consistency Grid** for that epoch; a Lifetime Summary aggregating every epoch (explicitly labeled as a sum across separate periods, never implied as one unbroken streak); and a collapsible Epoch History.
+
+The grid is a *categorical* consistency view, not a color-intensity heatmap, with five states distinguished by more than color alone (fill, border style, and an icon):
+
+- **Completed** — filled, with a check
+- **Missed** — outlined, with a small dash (calm, not alarming — this is information, not a rebuke)
+- **Not scheduled** — recessive/dashed, for any day the habit's own schedule didn't call for (e.g. Tuesday for a Mon/Wed/Fri habit) — never shown as missed
+- **Paused** — a spanning band, reserved for gaps *between* epochs; a single epoch's own grid structurally never contains one, since pausing is exactly what closes an epoch
+- **Future** — today (not yet elapsed) or later; never shown as missed, even if you haven't completed today's habit yet
+
+Rows follow Momentum's Saturday–Friday week and are grouped into collapsible month sections, most recent first, with older months loaded lazily as you scroll rather than rendering a multi-year history all at once. Weekly-frequency habits render one merged state per week instead of seven daily cells, since a weekly habit's actual commitment is "sometime this week," not a specific day.
+
+*Known limitation:* if a habit's weekday schedule is edited, the grid — like the rest of the app — doesn't retroactively know what the schedule was on any given historical day; it renders past days against the *current* schedule. Building full schedule-versioning was judged out of scope for this grid alone.
 
 ## Activity archive
 
@@ -253,7 +273,7 @@ For the selected range:
 - **Average lateness**, in days, across Scheduled and Recurring completions that finished late.
 - **Weekly completion trend & planned-vs-completed charts**, plotted over the most recent weeks regardless of the selected range.
 - **Rule-based planning-realism insights** — plain, factual observations (e.g. *"you're completing about X% of planned goals on average"*), never psychological or medical framing.
-- **Habit consistency** — per-habit completion rate over a trailing window, plus current/best streaks.
+- **Habit consistency** — per-habit completion rate over a trailing window, plus current/best streaks, scoped to the habit's currently active tracking period so a past pause is never counted against it. (This app-wide panel is separate from the per-habit [Analysis screen](#habits-pauseresume--the-analysis-screen), which is lifetime/epoch-scoped for one specific habit.)
 
 A rate is only ever shown when the underlying denominator is non-zero — Momentum shows "—" rather than a fabricated percentage when there's nothing to measure yet.
 
@@ -301,7 +321,8 @@ Once deployed, open the HTTPS URL on your phone and install it from there — th
 ```
 src/
   config/app.config.ts      # app name/version/schema version — the one place to rebrand the UI
-  types/models.ts           # Goal, RecurringDefinition, Habit, HabitCompletion, WeeklySnapshot, AppSettings
+  types/models.ts           # Goal, RecurringDefinition, Habit (status/epochs/weekdays), HabitCompletion,
+                              #   WeeklySnapshot, AppSettings
   lib/
     date/week.ts             # the Saturday–Friday custom week engine
     date/ranges.ts           # Analytics period math (Month/Quarter/Half-Year/Year/All)
@@ -314,12 +335,15 @@ src/
     logic/                    # pure, unit-tested business rules:
                                #   goalKind (Late/active/expired semantics), goalSort (Home priority),
                                #   recurrence (occurrence-date generation), deadline urgency, streaks,
-                               #   rollover/snapshot aggregation, retention eligibility, analytics
-    backup/backup.ts          # export/import/validate JSON backups, incl. v1 -> v2 migration
+                               #   rollover/snapshot aggregation, retention eligibility, analytics,
+                               #   habitSchedule (weekday due-ness), epochs (derived epoch/lifetime
+                               #   stats), habitGrid (Visual Consistency Grid day/week classification)
+    backup/backup.ts          # export/import/validate JSON backups, incl. v1 -> v2 -> v3 migration
     seed/seedData.ts          # dev-only sample data (never runs automatically)
-  hooks/                     # useGoals, useHabits, useTheme, useAppInit (reactive Dexie queries)
-  components/                # ui/ primitives, goals/, habits/, layout/ (nav, install prompt)
-  screens/                   # HomeScreen, AnalyticsScreen, HistoryScreen (Activity), SettingsScreen
+  hooks/                     # useGoals, useHabits (active/paused/single-habit queries), useTheme, useAppInit
+  components/                # ui/ primitives, goals/, habits/ (card, form, consistency grid), layout/
+  screens/                   # HomeScreen, AnalyticsScreen, HistoryScreen (Activity), SettingsScreen,
+                              #   HabitAnalysisScreen (lazy-loaded per-habit epoch/grid view)
   App.tsx, main.tsx
 ```
 
@@ -329,7 +353,7 @@ src/
 npm run test
 ```
 
-The suite (Vitest) covers the business logic that actually matters to get right: custom week boundaries (including the Friday 23:59 → Saturday 00:00 transition, end-of-month, end-of-year, and a leap-year date), Late/active/expired goal-kind semantics, Home priority sorting (including the worked examples in this README), recurrence-occurrence generation and its idempotency, weekly rollover idempotency and multi-week-gap handling (via `fake-indexeddb`, exercising the real Dexie code path), the IndexedDB v1 → v2 schema migration against a real seeded legacy database, retention-eligibility rules, Analytics time-range aggregation, and backup validation/migration/round-tripping.
+The suite (Vitest) covers the business logic that actually matters to get right: custom week boundaries (including the Friday 23:59 → Saturday 00:00 transition, end-of-month, end-of-year, and a leap-year date), Late/active/expired goal-kind semantics, Home priority sorting (including the worked examples in this README), recurrence-occurrence generation and its idempotency, weekly rollover idempotency and multi-week-gap handling (via `fake-indexeddb`, exercising the real Dexie code path), the IndexedDB v1 → v2 → v3 schema migrations against a real seeded legacy database, retention-eligibility rules, Analytics time-range aggregation, and backup validation/migration/round-tripping — plus, for habits: pause/resume epoch mechanics through many cycles (via `fake-indexeddb`), derived epoch/lifetime statistics (including zero-completion and zero-duration edge cases), weekday due-date logic, and Visual Consistency Grid day-state classification (completed/missed/not-scheduled/future, and that a closed epoch's own grid never renders a paused band).
 
 ## Build & quality checks
 
@@ -347,8 +371,8 @@ All four are expected to pass cleanly before any change is considered done.
 - No cloud sync — data is per-device; use Export/Import to move it between devices.
 - Import replaces all local data rather than merging with existing data.
 - Analytics reflects weeks the app has actually tracked through; a task manually backdated to a calendar week before the app was first opened (or before that week was ever "seen") won't retroactively appear in weekly aggregates — it remains fully functional and visible on Home either way.
-- No calendar-heatmap habit view (kept out as a nice-to-have).
 - App icons are generated placeholder monograms, not custom artwork.
+- The habit consistency grid renders past days against a habit's *current* weekday schedule — if the schedule was edited, historical days aren't retroactively re-evaluated against whatever the schedule was at the time (see [Habits, pause/resume & the Analysis screen](#habits-pauseresume--the-analysis-screen)).
 
 ## License
 

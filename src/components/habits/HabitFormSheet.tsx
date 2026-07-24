@@ -20,8 +20,12 @@ export interface HabitFormValues {
   name: string
   description: string
   frequency: HabitFrequency
+  /** Only meaningful when frequency === 'daily'. Empty = due every day (unrestricted, original behavior). */
+  weekdays: number[]
   icon: string
 }
+
+const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 interface HabitFormSheetProps {
   open: boolean
@@ -44,20 +48,29 @@ export const HABIT_ICONS: Record<string, LucideIcon> = {
 }
 
 function emptyValues(): HabitFormValues {
-  return { name: '', description: '', frequency: 'daily', icon: 'sparkles' }
+  return { name: '', description: '', frequency: 'daily', weekdays: [], icon: 'sparkles' }
 }
 
 function valuesFromHabit(habit: Habit): HabitFormValues {
-  return { name: habit.name, description: habit.description ?? '', frequency: habit.frequency, icon: habit.icon ?? 'sparkles' }
+  return {
+    name: habit.name,
+    description: habit.description ?? '',
+    frequency: habit.frequency,
+    weekdays: habit.weekdays ?? [],
+    icon: habit.icon ?? 'sparkles',
+  }
 }
 
 export function HabitFormSheet({ open, onClose, onSubmit, initialHabit }: HabitFormSheetProps) {
   const [values, setValues] = useState<HabitFormValues>(emptyValues())
+  const [restrictDays, setRestrictDays] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
-      setValues(initialHabit ? valuesFromHabit(initialHabit) : emptyValues())
+      const next = initialHabit ? valuesFromHabit(initialHabit) : emptyValues()
+      setValues(next)
+      setRestrictDays(next.weekdays.length > 0)
       setError(null)
     }
   }, [open, initialHabit])
@@ -68,7 +81,18 @@ export function HabitFormSheet({ open, onClose, onSubmit, initialHabit }: HabitF
       setError('Give your habit a name.')
       return
     }
-    onSubmit(values)
+    if (values.frequency === 'daily' && restrictDays && values.weekdays.length === 0) {
+      setError('Pick at least one day of the week.')
+      return
+    }
+    onSubmit({ ...values, weekdays: values.frequency === 'daily' && restrictDays ? values.weekdays : [] })
+  }
+
+  const toggleWeekday = (day: number) => {
+    setValues((v) => ({
+      ...v,
+      weekdays: v.weekdays.includes(day) ? v.weekdays.filter((d) => d !== day) : [...v.weekdays, day].sort(),
+    }))
   }
 
   return (
@@ -126,6 +150,58 @@ export function HabitFormSheet({ open, onClose, onSubmit, initialHabit }: HabitF
             ))}
           </div>
         </fieldset>
+
+        {values.frequency === 'daily' && (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-0.5 block text-xs font-medium text-ink-muted">Which days</legend>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setRestrictDays(false)}
+                aria-pressed={!restrictDays}
+                className={`rounded-md border px-3 py-2.5 text-sm font-medium transition ${
+                  !restrictDays
+                    ? 'border-accent bg-accent-muted text-accent'
+                    : 'border-border text-ink-muted hover:bg-surface-sunken'
+                }`}
+              >
+                Every day
+              </button>
+              <button
+                type="button"
+                onClick={() => setRestrictDays(true)}
+                aria-pressed={restrictDays}
+                className={`rounded-md border px-3 py-2.5 text-sm font-medium transition ${
+                  restrictDays
+                    ? 'border-accent bg-accent-muted text-accent'
+                    : 'border-border text-ink-muted hover:bg-surface-sunken'
+                }`}
+              >
+                Specific day(s)
+              </button>
+            </div>
+
+            {restrictDays && (
+              <div className="flex flex-wrap gap-1.5">
+                {WEEKDAY_LABELS.map((label, day) => (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => toggleWeekday(day)}
+                    aria-pressed={values.weekdays.includes(day)}
+                    className={`flex size-10 items-center justify-center rounded-full border text-xs font-medium transition ${
+                      values.weekdays.includes(day)
+                        ? 'border-accent bg-accent-muted text-accent'
+                        : 'border-border text-ink-muted hover:bg-surface-sunken'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </fieldset>
+        )}
 
         <fieldset>
           <legend className="mb-1.5 block text-xs font-medium text-ink-muted">Icon</legend>

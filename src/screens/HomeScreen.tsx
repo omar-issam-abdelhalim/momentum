@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { CalendarCheck, ChevronDown, Flag, ListChecks, Plus, Sparkles } from 'lucide-react'
 import { useHomeGoals } from '@/hooks/useGoals'
-import { useActiveHabits, type HabitWithState } from '@/hooks/useHabits'
+import { useActiveHabits, usePausedHabits, type HabitWithState } from '@/hooks/useHabits'
 import { useToast } from '@/components/ui/Toast'
 import { GoalCard } from '@/components/goals/GoalCard'
 import { GoalFormSheet, type GoalFormValues } from '@/components/goals/GoalFormSheet'
@@ -21,12 +21,24 @@ import {
   updateGoal,
 } from '@/lib/db/goals.repo'
 import { createRecurringDefinition } from '@/lib/db/recurring.repo'
-import { createHabit, deleteHabit as deleteHabitRepo, toggleHabitCompletion, updateHabit } from '@/lib/db/habits.repo'
+import {
+  createHabit,
+  deleteHabit as deleteHabitRepo,
+  pauseHabit,
+  resumeHabit,
+  toggleHabitCompletion,
+  updateHabit,
+} from '@/lib/db/habits.repo'
 import type { Goal } from '@/types/models'
+
+const HabitAnalysisScreen = lazy(() =>
+  import('@/screens/HabitAnalysisScreen').then((m) => ({ default: m.HabitAnalysisScreen })),
+)
 
 export function HomeScreen() {
   const { loading: goalsLoading, active: activeGoals, completed: completedGoals } = useHomeGoals()
-  const { loading: habitsLoading, habits } = useActiveHabits()
+  const { loading: activeHabitsLoading, habits: activeHabitList } = useActiveHabits()
+  const { loading: pausedHabitsLoading, habits: pausedHabitList } = usePausedHabits()
   const { showToast } = useToast()
 
   const [addMenuOpen, setAddMenuOpen] = useState(false)
@@ -37,6 +49,11 @@ export function HomeScreen() {
   const [deletingGoal, setDeletingGoal] = useState<Goal | null>(null)
   const [deletingHabit, setDeletingHabit] = useState<HabitWithState | null>(null)
   const [showCompleted, setShowCompleted] = useState(false)
+  const [habitSegment, setHabitSegment] = useState<'active' | 'paused'>('active')
+  const [analysisHabitId, setAnalysisHabitId] = useState<string | null>(null)
+
+  const habitsLoading = habitSegment === 'active' ? activeHabitsLoading : pausedHabitsLoading
+  const habits = habitSegment === 'active' ? activeHabitList : pausedHabitList
 
   const weeklyGoals = [...activeGoals, ...completedGoals].filter((g) => g.kind === 'weekly')
   const weeklyCompleted = weeklyGoals.filter((g) => g.completed).length
@@ -92,6 +109,16 @@ export function HomeScreen() {
   const handleToggleHabit = async (habit: HabitWithState) => {
     const result = await toggleHabitCompletion(habit)
     if (result === 'completed') showToast(`${habit.name} marked done`)
+  }
+
+  const handlePauseHabit = async (habit: HabitWithState) => {
+    await pauseHabit(habit.id)
+    showToast(`${habit.name} paused`)
+  }
+
+  const handleResumeHabit = async (habit: HabitWithState) => {
+    await resumeHabit(habit.id)
+    showToast(`${habit.name} resumed`)
   }
 
   const handleDeleteHabit = async () => {
@@ -194,8 +221,33 @@ export function HomeScreen() {
           </h2>
         </div>
 
+        <div className="mb-3 flex gap-1.5">
+          {(['active', 'paused'] as const).map((segment) => (
+            <button
+              key={segment}
+              type="button"
+              onClick={() => setHabitSegment(segment)}
+              aria-pressed={habitSegment === segment}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium capitalize transition ${
+                habitSegment === segment
+                  ? 'border-accent bg-accent-muted text-accent'
+                  : 'border-border text-ink-muted hover:bg-surface-sunken'
+              }`}
+            >
+              {segment}
+              {segment === 'paused' && pausedHabitList.length > 0 ? ` (${pausedHabitList.length})` : ''}
+            </button>
+          ))}
+        </div>
+
         {!habitsLoading && habits.length === 0 && (
-          <EmptyState icon={Sparkles} title="No habits added yet." description="Track daily or weekly routines here." />
+          <EmptyState
+            icon={Sparkles}
+            title={habitSegment === 'active' ? 'No habits added yet.' : 'No paused habits.'}
+            description={
+              habitSegment === 'active' ? 'Track daily or weekly routines here.' : 'Paused habits will show up here.'
+            }
+          />
         )}
 
         <div className="flex flex-col gap-2">
@@ -209,6 +261,9 @@ export function HomeScreen() {
                 setHabitFormOpen(true)
               }}
               onDelete={(h) => setDeletingHabit(h)}
+              onPause={handlePauseHabit}
+              onResume={handleResumeHabit}
+              onAnalysis={(h) => setAnalysisHabitId(h.id)}
             />
           ))}
         </div>
@@ -272,6 +327,12 @@ export function HomeScreen() {
         onConfirm={handleDeleteHabit}
         onCancel={() => setDeletingHabit(null)}
       />
+
+      {analysisHabitId && (
+        <Suspense fallback={<div className="fixed inset-0 z-50 bg-surface" aria-busy="true" />}>
+          <HabitAnalysisScreen habitId={analysisHabitId} onBack={() => setAnalysisHabitId(null)} />
+        </Suspense>
+      )}
     </div>
   )
 }

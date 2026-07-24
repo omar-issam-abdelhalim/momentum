@@ -86,14 +86,52 @@ export interface RecurringDefinition {
 
 export type HabitFrequency = 'daily' | 'weekly'
 
+/**
+ * Extensible habit lifecycle status. Only 'active' and 'paused' are
+ * implemented/exposed today. Represented as a string union (not a boolean)
+ * specifically so a future 'retired' value (habit graduated to automatic,
+ * no longer tracked) can be added later without a breaking migration — see
+ * PROJECT_CONTEXT.md for the full rationale. No automatic time-based
+ * transitions between statuses; every change is an explicit user action.
+ */
+export type HabitStatus = 'active' | 'paused'
+
+/**
+ * A continuous active period of a habit, bounded by pause/resume events.
+ * `startDate`/`endDate` are epoch milliseconds; `endDate` is null while the
+ * epoch is open (habit currently active). A habit's `epochs` are always in
+ * chronological order. Epoch statistics (completion rate, streaks, etc.) are
+ * deliberately NOT stored here — they are derived on demand from immutable
+ * HabitCompletion records bounded by [startDate, endDate ?? now]. See
+ * lib/logic/epochs.ts and PROJECT_CONTEXT.md for the derived-vs-snapshot
+ * architecture decision.
+ */
+export interface HabitEpoch {
+  id: string
+  startDate: number
+  endDate: number | null
+}
+
 export interface Habit {
   id: string
   name: string
   description?: string
   frequency: HabitFrequency
+  /**
+   * Specific weekdays this habit is due, date-fns getDay() convention
+   * (0=Sun..6=Sat) — mirrors RecurringDefinition.weekdays. Only meaningful
+   * when frequency === 'daily'; undefined/empty means due every day
+   * (the original, unrestricted 'daily' behavior — unchanged for any habit
+   * that never sets this). Ignored for frequency === 'weekly', which keeps
+   * its existing "once anywhere in the week" semantics with no per-day
+   * due-ness concept.
+   */
+  weekdays?: number[]
   icon?: string
   order: number
-  active: boolean
+  status: HabitStatus
+  /** Chronologically ordered; the last entry is open (endDate: null) iff status === 'active'. */
+  epochs: HabitEpoch[]
   createdAt: number
 }
 

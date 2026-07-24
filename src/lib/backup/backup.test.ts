@@ -37,7 +37,7 @@ function validBackup(): BackupFile {
         },
       ],
       habits: [
-        { id: 'h1', name: 'Read', frequency: 'daily', order: 0, active: true, createdAt: Date.now() },
+        { id: 'h1', name: 'Read', frequency: 'daily', order: 0, active: true, createdAt: Date.now() } as unknown as BackupFile['data']['habits'][number],
       ],
       habitCompletions: [{ id: 'c1', habitId: 'h1', periodId: '2026-07-18', completedAt: Date.now() }],
       weeklySnapshots: [
@@ -108,7 +108,9 @@ function legacyV1Backup(): BackupFile {
         } as unknown as BackupFile['data']['goals'][number],
       ],
       recurringDefinitions: [],
-      habits: [{ id: 'h1', name: 'Read', frequency: 'daily', order: 0, active: true, createdAt: Date.now() }],
+      habits: [
+        { id: 'h1', name: 'Read', frequency: 'daily', order: 0, active: true, createdAt: Date.now() } as unknown as BackupFile['data']['habits'][number],
+      ],
       habitCompletions: [],
       weeklySnapshots: [
         {
@@ -180,6 +182,24 @@ describe('validateBackupFile', () => {
     const result = validateBackupFile(backup)
     expect(result.valid).toBe(false)
   })
+
+  it('accepts a well-formed v3 backup with status/epochs habits', () => {
+    const backup = validBackup()
+    backup.schemaVersion = 3
+    backup.data.habits = [
+      {
+        id: 'h1',
+        name: 'Read',
+        frequency: 'daily',
+        order: 0,
+        status: 'active',
+        epochs: [{ id: 'e1', startDate: 0, endDate: null }],
+        createdAt: 0,
+      },
+    ]
+    const result = validateBackupFile(backup)
+    expect(result.valid).toBe(true)
+  })
 })
 
 describe('migrateBackupToLatest', () => {
@@ -209,6 +229,41 @@ describe('migrateBackupToLatest', () => {
   it('leaves an already-current backup untouched aside from filling recurringDefinitions', () => {
     const migrated = migrateBackupToLatest(validBackup())
     expect(migrated.data.recurringDefinitions).toHaveLength(1)
+  })
+
+  it('migrates a pre-v3 (schemaVersion 2) habit to status/epochs using the same active-flag mapping as the live DB migration', () => {
+    const migrated = migrateBackupToLatest(validBackup())
+    const habit = migrated.data.habits[0]
+    expect(habit.status).toBe('active')
+    expect(habit.epochs).toHaveLength(1)
+    expect(habit.epochs[0].endDate).toBeNull()
+    expect((habit as unknown as { active?: boolean }).active).toBeUndefined()
+  })
+
+  it('migrates a legacy v1 habit to status/epochs as well', () => {
+    const migrated = migrateBackupToLatest(legacyV1Backup())
+    const habit = migrated.data.habits[0]
+    expect(habit.status).toBe('active')
+    expect(habit.epochs).toHaveLength(1)
+  })
+
+  it('leaves an already-v3 habit (status/epochs already present) untouched', () => {
+    const backup = validBackup()
+    backup.schemaVersion = 3
+    backup.data.habits = [
+      {
+        id: 'h1',
+        name: 'Read',
+        frequency: 'daily',
+        order: 0,
+        status: 'paused',
+        epochs: [{ id: 'e1', startDate: 0, endDate: 100 }],
+        createdAt: 0,
+      },
+    ]
+    const migrated = migrateBackupToLatest(backup)
+    expect(migrated.data.habits[0].status).toBe('paused')
+    expect(migrated.data.habits[0].epochs).toEqual([{ id: 'e1', startDate: 0, endDate: 100 }])
   })
 })
 
@@ -264,5 +319,34 @@ describe('importBackup', () => {
     const goals = await db.goals.toArray()
     expect(goals).toHaveLength(2)
     expect(goals.every((g) => g.kind !== undefined)).toBe(true)
+  })
+
+  it('round-trips habit status and epoch history through export/import', async () => {
+    const backup = validBackup()
+    backup.schemaVersion = 3
+    backup.data.habits = [
+      {
+        id: 'h1',
+        name: 'Read',
+        frequency: 'daily',
+        order: 0,
+        status: 'paused',
+        epochs: [
+          { id: 'e1', startDate: 100, endDate: 200 },
+          { id: 'e2', startDate: 300, endDate: 400 },
+        ],
+        createdAt: 100,
+      },
+    ]
+    await importBackup(backup)
+
+    const habit = await db.habits.get('h1')
+    expect(habit?.status).toBe('paused')
+    expect(habit?.epochs).toHaveLength(2)
+
+    const rebuilt = await buildBackup()
+    const rebuiltHabit = rebuilt.data.habits.find((h) => h.id === 'h1')
+    expect(rebuiltHabit?.status).toBe('paused')
+    expect(rebuiltHabit?.epochs).toHaveLength(2)
   })
 })

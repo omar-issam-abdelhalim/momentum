@@ -1,8 +1,9 @@
 import { db } from '@/lib/db/db'
+import { createId } from '@/lib/id'
 import { APP_CONFIG } from '@/config/app.config'
 import type { AppSettings, BackupFile, Goal, Habit, HabitCompletion, RecurringDefinition, WeeklySnapshot } from '@/types/models'
 
-const SUPPORTED_SCHEMA_VERSIONS = [1, 2]
+const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3]
 
 export async function buildBackup(): Promise<BackupFile> {
   const [goals, recurringDefinitions, habits, habitCompletions, weeklySnapshots, settings] = await Promise.all([
@@ -86,12 +87,21 @@ const isWeeklySnapshot = (v: unknown): v is WeeklySnapshot =>
 
 // --- shared shapes ----------------------------------------------------------
 
-const isHabit = (v: unknown): v is Habit =>
+/** Pre-v3 habit shape: `active: boolean`, no status/epochs yet. */
+const isLegacyHabit = (v: unknown): boolean =>
   isPlainObject(v) &&
   typeof v.id === 'string' &&
   typeof v.name === 'string' &&
   (v.frequency === 'daily' || v.frequency === 'weekly') &&
   typeof v.active === 'boolean'
+
+const isHabit = (v: unknown): v is Habit =>
+  isPlainObject(v) &&
+  typeof v.id === 'string' &&
+  typeof v.name === 'string' &&
+  (v.frequency === 'daily' || v.frequency === 'weekly') &&
+  (v.status === 'active' || v.status === 'paused') &&
+  Array.isArray(v.epochs)
 
 const isHabitCompletion = (v: unknown): v is HabitCompletion =>
   isPlainObject(v) && typeof v.id === 'string' && typeof v.habitId === 'string' && typeof v.periodId === 'string'
@@ -118,12 +128,13 @@ export function validateBackupFile(raw: unknown): ValidationResult {
 
   const data = raw.data
   const isLegacy = raw.schemaVersion === 1
+  const habitsAreLegacy = (raw.schemaVersion as number) < 3
 
   if (!isArrayOf(data.goals, isLegacy ? isLegacyGoal : isGoal)) errors.push('goals data is missing or malformed.')
   if (!isLegacy && data.recurringDefinitions !== undefined && !isArrayOf(data.recurringDefinitions, isRecurringDefinition)) {
     errors.push('recurringDefinitions data is malformed.')
   }
-  if (!isArrayOf(data.habits, isHabit)) errors.push('habits data is missing or malformed.')
+  if (!isArrayOf(data.habits, habitsAreLegacy ? isLegacyHabit : isHabit)) errors.push('habits data is missing or malformed.')
   if (!isArrayOf(data.habitCompletions, isHabitCompletion)) errors.push('habitCompletions data is missing or malformed.')
   if (!isArrayOf(data.weeklySnapshots, isLegacy ? isLegacyWeeklySnapshot : isWeeklySnapshot)) {
     errors.push('weeklySnapshots data is missing or malformed.')
@@ -193,6 +204,30 @@ function migrateLegacySnapshot(raw: Record<string, unknown>): WeeklySnapshot {
   }
 }
 
+/**
+ * Migrates a pre-v3 habit (`active: boolean`, no status/epochs) to the
+ * current shape, using the exact same mapping as the live-database v2->v3
+ * Dexie migration in lib/db/db.ts: `active` -> `status`, plus one implicit
+ * epoch spanning the habit's history to date. Applied for both v1 and v2
+ * backups, since neither ever had status/epochs.
+ */
+function migrateLegacyHabit(raw: Record<string, unknown>): Habit {
+  const wasActive = (raw.active as boolean) ?? true
+  const createdAt = (raw.createdAt as number) ?? Date.now()
+  return {
+    id: raw.id as string,
+    name: raw.name as string,
+    description: raw.description as string | undefined,
+    frequency: raw.frequency as Habit['frequency'],
+    weekdays: undefined,
+    icon: raw.icon as string | undefined,
+    order: (raw.order as number) ?? 0,
+    status: wasActive ? 'active' : 'paused',
+    epochs: [{ id: createId(), startDate: createdAt, endDate: wasActive ? null : createdAt }],
+    createdAt,
+  }
+}
+
 function migrateLegacySettings(raw: Record<string, unknown>): AppSettings {
   return {
     id: 'app',
@@ -214,7 +249,7 @@ export function migrateBackupToLatest(raw: BackupFile): BackupFile {
   if (raw.schemaVersion === 1) {
     const legacyData = raw.data as unknown as {
       goals: Record<string, unknown>[]
-      habits: Habit[]
+      habits: Record<string, unknown>[]
       habitCompletions: HabitCompletion[]
       weeklySnapshots: Record<string, unknown>[]
       settings: Record<string, unknown>[]
@@ -226,7 +261,7 @@ export function migrateBackupToLatest(raw: BackupFile): BackupFile {
       data: {
         goals: legacyData.goals.map(migrateLegacyGoal),
         recurringDefinitions: [],
-        habits: legacyData.habits,
+        habits: legacyData.habits.map(migrateLegacyHabit),
         habitCompletions: legacyData.habitCompletions,
         weeklySnapshots: legacyData.weeklySnapshots.map(migrateLegacySnapshot),
         settings: legacyData.settings.map(migrateLegacySettings),
@@ -234,11 +269,16 @@ export function migrateBackupToLatest(raw: BackupFile): BackupFile {
     }
   }
 
+  const habitsNeedMigration = raw.schemaVersion < 3
   return {
     ...raw,
+    schemaVersion: APP_CONFIG.schemaVersion,
     data: {
       ...raw.data,
       recurringDefinitions: raw.data.recurringDefinitions ?? [],
+      habits: habitsNeedMigration
+        ? (raw.data.habits as unknown as Record<string, unknown>[]).map(migrateLegacyHabit)
+        : raw.data.habits,
     },
   }
 }

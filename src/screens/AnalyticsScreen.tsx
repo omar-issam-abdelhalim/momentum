@@ -78,7 +78,7 @@ export function AnalyticsScreen() {
 
   const trendSeries = weeklyCompletionSeries(snapshots.slice(-12))
 
-  const activeHabits = habits.filter((h) => h.active)
+  const activeHabits = habits.filter((h) => h.status === 'active')
   const habitSummaries = summarizeHabitAnalytics(
     activeHabits,
     completions,
