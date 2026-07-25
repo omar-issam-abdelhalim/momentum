@@ -80,4 +80,39 @@ describe('runRecurringGeneration', () => {
     const result = await runRecurringGeneration()
     expect(result.createdCount).toBe(0)
   })
+
+  it('copies the definition targetCount onto each occurrence, each starting its own independent count at 0', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 21)) // Tuesday, 2026-07-21
+    const def = await createRecurringDefinition({
+      title: 'Drink 3 waters',
+      recurrenceType: 'weekly',
+      weekdays: [2],
+      targetCount: 3,
+    })
+    await runRecurringGeneration()
+
+    let occurrences = await db.goals.where('recurringDefinitionId').equals(def.id).toArray()
+    expect(occurrences).toHaveLength(1)
+    expect(occurrences[0].targetCount).toBe(3)
+    expect(occurrences[0].currentCount).toBe(0)
+
+    // Bump the first occurrence's count partway, and leave it Late/incomplete.
+    await db.goals.update(occurrences[0].id, { currentCount: 2 })
+
+    // A week later, a second independent occurrence is generated.
+    vi.setSystemTime(new Date(2026, 6, 28)) // Tuesday, 2026-07-28
+    await runRecurringGeneration()
+
+    occurrences = await db.goals.where('recurringDefinitionId').equals(def.id).toArray()
+    expect(occurrences).toHaveLength(2)
+    const first = occurrences.find((o) => o.scheduledDateISO === '2026-07-21')
+    const second = occurrences.find((o) => o.scheduledDateISO === '2026-07-28')
+    // The Late occurrence's partial count is untouched...
+    expect(first?.currentCount).toBe(2)
+    expect(first?.completed).toBe(false)
+    // ...and never leaked into the new occurrence's independent count.
+    expect(second?.currentCount).toBe(0)
+    expect(second?.targetCount).toBe(3)
+  })
 })

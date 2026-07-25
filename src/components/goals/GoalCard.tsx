@@ -3,13 +3,18 @@ import { Check, Clock, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-
 import type { Goal } from '@/types/models'
 import { getDeadlineUrgency, URGENCY_LABEL } from '@/lib/logic/deadline'
 import { isLate, lateDays } from '@/lib/logic/goalKind'
+import { effectiveTarget, isCounterTarget, progressPercent } from '@/lib/logic/quantity'
 import { formatShortDate } from '@/lib/date/format'
 import { getTodayISO } from '@/lib/date/week'
 import { ActionSheet } from '@/components/ui/ActionSheet'
+import { ProgressRing } from '@/components/ui/ProgressRing'
+import { usePressHandlers } from '@/hooks/useLongPress'
 
 interface GoalCardProps {
   goal: Goal
   onToggleComplete: (goal: Goal) => void
+  onIncrement: (goal: Goal) => void
+  onDecrement: (goal: Goal) => void
   onEdit: (goal: Goal) => void
   onDelete: (goal: Goal) => void
 }
@@ -28,12 +33,20 @@ const KIND_LABEL: Record<Goal['kind'], string> = {
   recurring: 'Recurring',
 }
 
-export function GoalCard({ goal, onToggleComplete, onEdit, onDelete }: GoalCardProps) {
+export function GoalCard({ goal, onToggleComplete, onIncrement, onDecrement, onEdit, onDelete }: GoalCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const todayISO = getTodayISO()
   const urgency = getDeadlineUrgency(goal.deadlineISO, todayISO)
   const late = isLate(goal, todayISO)
   const daysLate = late ? lateDays(goal, todayISO) : 0
+
+  const target = effectiveTarget(goal.targetCount)
+  const isCounter = isCounterTarget(goal.targetCount)
+  const count = goal.currentCount ?? 0
+  const pressHandlers = usePressHandlers({
+    onTap: () => onIncrement(goal),
+    onHold: () => onDecrement(goal),
+  })
 
   return (
     <div
@@ -41,17 +54,31 @@ export function GoalCard({ goal, onToggleComplete, onEdit, onDelete }: GoalCardP
         goal.completed ? 'opacity-60' : ''
       }`}
     >
-      <button
-        type="button"
-        onClick={() => onToggleComplete(goal)}
-        aria-pressed={goal.completed}
-        aria-label={goal.completed ? 'Mark incomplete' : 'Mark complete'}
-        className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition active:scale-90 ${
-          goal.completed ? 'border-accent bg-accent text-white animate-check-pop' : 'border-border-strong text-transparent'
-        }`}
-      >
-        <Check size={14} strokeWidth={3} />
-      </button>
+      {isCounter && !goal.completed ? (
+        <button
+          type="button"
+          aria-label={`${goal.title}: ${count} of ${target}. Tap to add one, hold to undo one.`}
+          className="mt-0.5 flex shrink-0 touch-none select-none items-center justify-center active:scale-90"
+          onPointerDown={pressHandlers.onPointerDown}
+          onPointerUp={pressHandlers.onPointerUp}
+          onPointerLeave={pressHandlers.onPointerLeave}
+          onContextMenu={pressHandlers.onContextMenu}
+        >
+          <ProgressRing percent={progressPercent(count, target)} size={28} strokeWidth={3} label={String(count)} />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onToggleComplete(goal)}
+          aria-pressed={goal.completed}
+          aria-label={goal.completed ? 'Mark incomplete' : 'Mark complete'}
+          className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border-2 transition active:scale-90 ${
+            goal.completed ? 'border-accent bg-accent text-white animate-check-pop' : 'border-border-strong text-transparent'
+          }`}
+        >
+          <Check size={14} strokeWidth={3} />
+        </button>
+      )}
 
       <div className="min-w-0 flex-1">
         <p className={`text-sm font-medium text-ink ${goal.completed ? 'line-through' : ''}`}>{goal.title}</p>
@@ -61,6 +88,12 @@ export function GoalCard({ goal, onToggleComplete, onEdit, onDelete }: GoalCardP
           <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-medium text-ink-muted">
             {KIND_LABEL[goal.kind]}
           </span>
+
+          {isCounter && !goal.completed && (
+            <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-medium tabular-nums text-ink-muted">
+              {count}/{target}
+            </span>
+          )}
 
           {late && !goal.completed && (
             <span className="inline-flex items-center gap-1 rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger">

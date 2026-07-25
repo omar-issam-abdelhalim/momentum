@@ -16,14 +16,18 @@ import { formatLongDate } from '@/lib/date/format'
 import {
   completeGoal,
   createGoal,
+  decrementGoalProgress,
   deleteGoal as deleteGoalRepo,
+  incrementGoalProgress,
   uncompleteGoal,
   updateGoal,
 } from '@/lib/db/goals.repo'
 import { createRecurringDefinition } from '@/lib/db/recurring.repo'
 import {
   createHabit,
+  decrementHabitProgress,
   deleteHabit as deleteHabitRepo,
+  incrementHabitProgress,
   pauseHabit,
   resumeHabit,
   toggleHabitCompletion,
@@ -75,13 +79,26 @@ export function HomeScreen() {
     showToast('Goal deleted')
   }
 
+  const handleIncrementGoal = async (goal: Goal) => {
+    const result = await incrementGoalProgress(goal.id)
+    if (result.completed) {
+      showToast('Goal completed', { label: 'Undo', onAction: () => void uncompleteGoal(goal.id) })
+    }
+  }
+
+  const handleDecrementGoal = async (goal: Goal) => {
+    await decrementGoalProgress(goal.id)
+  }
+
   const handleGoalSubmit = async (values: GoalFormValues) => {
+    const targetCount = values.targetCount.trim() ? Number(values.targetCount) : undefined
     if (editingGoal) {
       await updateGoal(editingGoal.id, {
         title: values.title,
         description: values.description,
         scheduledDateISO: editingGoal.kind === 'weekly' ? undefined : values.scheduledDateISO,
         deadlineISO: values.deadlineISO || null,
+        targetCount: targetCount ?? null,
       })
       showToast('Updated')
     } else if (values.kind === 'recurring') {
@@ -90,6 +107,7 @@ export function HomeScreen() {
         description: values.description,
         recurrenceType: values.recurrenceType,
         weekdays: values.weekdays,
+        targetCount,
       })
       showToast('Recurring task added')
     } else {
@@ -99,6 +117,7 @@ export function HomeScreen() {
         kind: values.kind,
         scheduledDateISO: values.kind === 'weekly' ? undefined : values.scheduledDateISO,
         deadlineISO: values.deadlineISO || undefined,
+        targetCount,
       })
       showToast('Added')
     }
@@ -109,6 +128,15 @@ export function HomeScreen() {
   const handleToggleHabit = async (habit: HabitWithState) => {
     const result = await toggleHabitCompletion(habit)
     if (result === 'completed') showToast(`${habit.name} marked done`)
+  }
+
+  const handleIncrementHabit = async (habit: HabitWithState) => {
+    const result = await incrementHabitProgress(habit)
+    if (result.completed) showToast(`${habit.name} marked done`)
+  }
+
+  const handleDecrementHabit = async (habit: HabitWithState) => {
+    await decrementHabitProgress(habit)
   }
 
   const handlePauseHabit = async (habit: HabitWithState) => {
@@ -129,11 +157,12 @@ export function HomeScreen() {
   }
 
   const handleHabitSubmit = async (values: HabitFormValues) => {
+    const dailyTarget = values.dailyTarget.trim() ? Number(values.dailyTarget) : undefined
     if (editingHabit) {
-      await updateHabit(editingHabit.id, values)
+      await updateHabit(editingHabit.id, { ...values, dailyTarget: dailyTarget ?? null })
       showToast('Habit updated')
     } else {
-      await createHabit(values)
+      await createHabit({ ...values, dailyTarget })
       showToast('Habit added')
     }
     setHabitFormOpen(false)
@@ -174,6 +203,8 @@ export function HomeScreen() {
               key={goal.id}
               goal={goal}
               onToggleComplete={handleToggleGoal}
+              onIncrement={handleIncrementGoal}
+              onDecrement={handleDecrementGoal}
               onEdit={(g) => {
                 setEditingGoal(g)
                 setGoalFormOpen(true)
@@ -200,6 +231,8 @@ export function HomeScreen() {
                     key={goal.id}
                     goal={goal}
                     onToggleComplete={handleToggleGoal}
+                    onIncrement={handleIncrementGoal}
+                    onDecrement={handleDecrementGoal}
                     onEdit={(g) => {
                       setEditingGoal(g)
                       setGoalFormOpen(true)
@@ -256,6 +289,8 @@ export function HomeScreen() {
               key={habit.id}
               habit={habit}
               onToggle={handleToggleHabit}
+              onIncrement={handleIncrementHabit}
+              onDecrement={handleDecrementHabit}
               onEdit={(h) => {
                 setEditingHabit(h)
                 setHabitFormOpen(true)

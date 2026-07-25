@@ -153,6 +153,27 @@ export class MomentumDB extends Dexie {
             delete habit.active
           })
       })
+
+    // v4: optional counter-completion (target count) for Goals/RecurringDefinitions
+    // and daily-target quantity habits, plus per-period progress count on
+    // HabitCompletion. Deliberately no .upgrade() function here, unlike every
+    // prior version bump — every new field (Goal.targetCount/currentCount,
+    // RecurringDefinition.targetCount, Habit.dailyTarget,
+    // HabitCompletion.count) is optional and additive, none are indexed, and
+    // `undefined` already resolves to exactly today's binary behavior through
+    // lib/logic/quantity.ts and lib/logic/habitProgress.ts. There is nothing
+    // to transform on existing records — this version bump exists purely to
+    // mark the schema milestone (mirrored in APP_CONFIG.schemaVersion for
+    // backup-file compatibility), not because Dexie requires it.
+    this.version(4).stores({
+      goals:
+        'id, kind, currentWeekId, originalWeekId, scheduledDateISO, deadlineISO, createdAt, recurringDefinitionId',
+      recurringDefinitions: 'id, active, createdAt',
+      habits: 'id, frequency, order',
+      habitCompletions: 'id, habitId, periodId, [habitId+periodId], completedAt',
+      weeklySnapshots: 'weekId, weekStart',
+      settings: 'id',
+    })
   }
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  computeAverageDailyCompletionPct,
   computeEpochStats,
   computeLifetimeSummary,
   defaultEpochSelectionId,
@@ -26,8 +27,8 @@ function makeHabit(overrides: Partial<Habit>): Habit {
   }
 }
 
-function completion(habitId: string, periodId: string): HabitCompletion {
-  return { id: `c-${periodId}`, habitId, periodId, completedAt: 0 }
+function completion(habitId: string, periodId: string, count?: number): HabitCompletion {
+  return { id: `c-${periodId}`, habitId, periodId, completedAt: 0, count }
 }
 
 describe('getOpenEpoch / getClosedEpochsMostRecentFirst', () => {
@@ -158,6 +159,76 @@ describe('computeEpochStats — weekly habit', () => {
     expect(stats.totalDuePeriods).toBe(2)
     expect(stats.totalCompletions).toBe(2)
     expect(stats.completionRatePct).toBe(100)
+  })
+})
+
+describe('computeEpochStats — quantity (daily-target) habit', () => {
+  it('only counts a day as complete once its count reaches target — partial days never count toward streaks/rate', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 1), endDate: null }
+    const habit = makeHabit({ dailyTarget: 3, epochs: [epoch] })
+    const completions = [
+      completion(habit.id, '2026-07-01', 3), // fully at target
+      completion(habit.id, '2026-07-02', 2), // partial — must not count
+      completion(habit.id, '2026-07-03', 3), // fully at target
+    ]
+
+    const stats = computeEpochStats(habit, epoch, completions, '2026-07-03')
+    expect(stats.totalDuePeriods).toBe(3)
+    expect(stats.totalCompletions).toBe(2) // not 3 — the partial day is excluded
+    expect(stats.currentStreak).toBe(1) // 07-02 broke the streak, only 07-03 counts
+    expect(stats.bestStreak).toBe(1)
+  })
+
+  it('still breaks a streak-in-progress evaluation for today when partially progressed but not yet at target', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 1), endDate: null }
+    const habit = makeHabit({ dailyTarget: 3, epochs: [epoch] })
+    const completions = [completion(habit.id, '2026-07-08', 3), completion(habit.id, '2026-07-09', 2)] // today partial
+
+    const stats = computeEpochStats(habit, epoch, completions, '2026-07-09')
+    // Today (2026-07-09) isn't complete yet (2 of 3) — same "still in progress" grace as an untouched day.
+    expect(stats.currentStreak).toBe(1)
+  })
+})
+
+describe('computeAverageDailyCompletionPct', () => {
+  it('averages (count/target) across due days, capped at 1 per day', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 1), endDate: null }
+    const habit = makeHabit({ dailyTarget: 4, epochs: [epoch] })
+    const completions = [
+      completion(habit.id, '2026-07-01', 4), // 100%
+      completion(habit.id, '2026-07-02', 2), // 50%
+      // 2026-07-03: no record at all -> 0%
+    ]
+
+    const avg = computeAverageDailyCompletionPct(habit, epoch, completions, '2026-07-03')
+    expect(avg).toBe(50) // (100 + 50 + 0) / 3 = 50
+  })
+
+  it('caps a day at 100% even if its count exceeds target', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 1), endDate: null }
+    const habit = makeHabit({ dailyTarget: 2, epochs: [epoch] })
+    const completions = [completion(habit.id, '2026-07-01', 9)]
+
+    const avg = computeAverageDailyCompletionPct(habit, epoch, completions, '2026-07-01')
+    expect(avg).toBe(100)
+  })
+
+  it('never fabricates a rate when there are zero due days', () => {
+    const habit = makeHabit({ frequency: 'daily', dailyTarget: 3, weekdays: [1], epochs: [] }) // Monday only
+    const day = ts(2026, 7, 21) // a Tuesday
+    const epoch: HabitEpoch = { id: 'e1', startDate: day, endDate: day }
+
+    const avg = computeAverageDailyCompletionPct(habit, epoch, [], '2026-07-21')
+    expect(avg).toBeNull()
+  })
+
+  it('reads a legacy binary completion row (no count field) as fully at target', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 1), endDate: null }
+    const habit = makeHabit({ dailyTarget: 5, epochs: [epoch] })
+    const completions = [{ id: 'legacy', habitId: habit.id, periodId: '2026-07-01', completedAt: 0 }] // no count field
+
+    const avg = computeAverageDailyCompletionPct(habit, epoch, completions, '2026-07-01')
+    expect(avg).toBe(100)
   })
 })
 

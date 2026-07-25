@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/lib/db/db'
 import { getCurrentWeekId, getTodayISO } from '@/lib/date/week'
 import { computeEpochStats, getOpenEpoch } from '@/lib/logic/epochs'
+import { isCompletionAtTarget, progressCountForRecord, targetForHabit } from '@/lib/logic/habitProgress'
 import { isHabitDueOnDate } from '@/lib/logic/habitSchedule'
 import type { Habit, HabitCompletion } from '@/types/models'
 
@@ -11,11 +12,17 @@ export interface HabitWithState extends Habit {
   dueToday: boolean
   currentStreak: number
   bestStreak: number
+  /** Current period's progress count (0 if no record yet). Only meaningful when progressTarget > 1. */
+  progressCount: number
+  /** Effective completion target for the current period (always ≥ 1). */
+  progressTarget: number
 }
 
 function withState(habit: Habit, completions: HabitCompletion[], todayISO: string, currentWeekId: string): HabitWithState {
   const periodId = habit.frequency === 'daily' ? todayISO : currentWeekId
-  const completedThisPeriod = completions.some((c) => c.habitId === habit.id && c.periodId === periodId)
+  const target = targetForHabit(habit)
+  const record = completions.find((c) => c.habitId === habit.id && c.periodId === periodId)
+  const completedThisPeriod = isCompletionAtTarget(record, target)
   const dueToday = habit.frequency === 'weekly' || isHabitDueOnDate(habit, todayISO)
 
   const openEpoch = getOpenEpoch(habit)
@@ -27,6 +34,8 @@ function withState(habit: Habit, completions: HabitCompletion[], todayISO: strin
     dueToday,
     currentStreak: stats?.currentStreak ?? 0,
     bestStreak: stats?.bestStreak ?? 0,
+    progressCount: progressCountForRecord(record, target),
+    progressTarget: target,
   }
 }
 

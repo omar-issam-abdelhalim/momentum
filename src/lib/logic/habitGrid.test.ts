@@ -19,8 +19,8 @@ function makeHabit(overrides: Partial<Habit>): Habit {
   }
 }
 
-function completion(habitId: string, periodId: string): HabitCompletion {
-  return { id: `c-${periodId}`, habitId, periodId, completedAt: 0 }
+function completion(habitId: string, periodId: string, count?: number): HabitCompletion {
+  return { id: `c-${periodId}`, habitId, periodId, completedAt: 0, count }
 }
 
 function findDay(rows: ReturnType<typeof classifyDailyEpochGrid>, dateISO: string) {
@@ -96,6 +96,54 @@ describe('classifyDailyEpochGrid', () => {
 
     const allStates = rows.flatMap((r) => r.days.map((d) => d.state))
     expect(allStates).not.toContain('paused')
+  })
+})
+
+describe('classifyDailyEpochGrid — quantity (daily-target) habit', () => {
+  it('renders a past under-target day as partial, distinct from missed', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 20), endDate: null }
+    const habit = makeHabit({ dailyTarget: 3, epochs: [epoch] })
+    const completions = [completion(habit.id, '2026-07-20', 2)] // 2 of 3, past day
+    const rows = classifyDailyEpochGrid(habit, epoch, completions, '2026-07-22')
+
+    expect(findDay(rows, '2026-07-20')?.state).toBe('partial')
+    expect(findDay(rows, '2026-07-20')?.state).not.toBe('missed')
+  })
+
+  it('renders a past day with zero progress as missed, not partial', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 20), endDate: null }
+    const habit = makeHabit({ dailyTarget: 3, epochs: [epoch] })
+    const rows = classifyDailyEpochGrid(habit, epoch, [], '2026-07-22')
+
+    expect(findDay(rows, '2026-07-20')?.state).toBe('missed')
+  })
+
+  it('renders a past day that reached target as completed', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 20), endDate: null }
+    const habit = makeHabit({ dailyTarget: 3, epochs: [epoch] })
+    const completions = [completion(habit.id, '2026-07-20', 3)]
+    const rows = classifyDailyEpochGrid(habit, epoch, completions, '2026-07-22')
+
+    expect(findDay(rows, '2026-07-20')?.state).toBe('completed')
+  })
+
+  it('an in-progress today (count > 0, < target) still renders as future — never missed, never partial', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 20), endDate: null }
+    const habit = makeHabit({ dailyTarget: 3, epochs: [epoch] })
+    const completions = [completion(habit.id, '2026-07-22', 1)] // today, partial
+    const rows = classifyDailyEpochGrid(habit, epoch, completions, '2026-07-22')
+
+    expect(findDay(rows, '2026-07-22')?.state).toBe('future')
+    expect(findDay(rows, '2026-07-22')?.state).not.toBe('missed')
+    expect(findDay(rows, '2026-07-22')?.state).not.toBe('partial')
+  })
+
+  it('an untouched today (count 0) also renders as future, identically to a binary habit', () => {
+    const epoch: HabitEpoch = { id: 'e1', startDate: ts(2026, 7, 20), endDate: null }
+    const habit = makeHabit({ dailyTarget: 3, epochs: [epoch] })
+    const rows = classifyDailyEpochGrid(habit, epoch, [], '2026-07-22')
+
+    expect(findDay(rows, '2026-07-22')?.state).toBe('future')
   })
 })
 

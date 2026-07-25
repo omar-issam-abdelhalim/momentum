@@ -99,6 +99,7 @@ To move your data to another device, or to keep a backup, use **Settings → Exp
 ## Key features
 
 - **Four clear task types** — Scheduled Task, Weekly Goal, Today Only, and Recurring Task — each with unambiguous rules for when it's relevant and what happens if it's missed.
+- **Optional counter-based completion** — give any Task, or a daily Habit, a target count (e.g. "Drink 5 waters") and it's tracked with a tap-to-increment progress ring instead of a single checkbox; reaching the target completes it through the exact same pathway as any other item. Leave it unset (or 1) and everything behaves exactly as a single tap always has.
 - **Scheduled Date vs. Deadline as separate concepts** — "when I intend to start" and "the hard due date" are never conflated.
 - **Late tracking** — a missed Scheduled Task or Recurring occurrence stays visible and clearly marked *Late · N days*, forever, until you complete or delete it.
 - **A deliberate Home priority order** so today's plan and real urgency never fight each other — see [Home priority order](#home-priority-order).
@@ -184,6 +185,19 @@ Momentum has four task types, each with clear, distinct rules for when it's rele
 
 **Recurring Tasks** are built as a recurrence **definition** (daily, or specific weekday(s)) plus independently generated **occurrences** — not one record that gets mutated. That's what lets a missed Tuesday stay visibly Late while the following Tuesday's occurrence still shows up right on schedule, with no risk of the two ever overwriting each other. Occurrence generation runs at startup and is idempotent: reopening the app never creates a duplicate occurrence for a day it has already generated.
 
+### Optional target count (counter-based completion)
+
+Any of the four task types can optionally have a **target count**, set when creating or editing it (leave it blank for today's exact single-tap behavior). Once a target greater than 1 is set, the checkbox becomes a small progress ring: tap to add one, hold to undo one (floored at zero). Reaching the target completes the item through the exact same pathway as a normal tap — same completed look, same Home behavior, same single entry in Activity, no separate "you did 5 taps" record. A few rules keep this predictable per task type:
+
+| Type | If the target isn't reached when its time boundary passes |
+| --- | --- |
+| **Scheduled Task** | becomes Late as usual — progress is preserved, still completable by reaching the target |
+| **Weekly Goal** | rolls into next week as usual — progress carries over unchanged |
+| **Recurring Task** | the missed occurrence stays Late with its own progress preserved; the *next* occurrence still generates on schedule with its own count starting fresh at 0 — occurrences never share progress |
+| **Today Only** | expires at end of day as usual — progress is discarded along with the task, no rollover |
+
+Partial progress is a purely visual, in-progress indicator — it never contributes a fraction to Home's priority sorting, to ranged Analytics, or to Activity's completed counts, which all still only ever see a clean 0-or-1 per item, exactly as before this feature existed.
+
 ## Scheduled Date vs. Deadline
 
 These are two separate concepts and Momentum never conflates them:
@@ -220,6 +234,8 @@ Weekly Goals are sorted with the priority rules above; a rolled-over Weekly Goal
 
 Habits are daily or weekly. Daily habits reset at local midnight; weekly habits reset every Saturday. A daily habit can optionally be restricted to specific weekdays (e.g. Mon/Wed/Fri) — on days it isn't due, it's simply not asked for, never silently counted as missed. Weekly habits stay "once anywhere in the custom week," with no per-day due-ness. Streaks are computed from the underlying completion events (not a counter that can drift): a streak counts consecutive completed periods ending at "now," and isn't broken just because the *current* period hasn't been completed yet — only a genuinely missed prior period breaks it.
 
+**Daily habits can optionally have a daily target count** too (e.g. "Drink water" ×5) — the same tap-to-increment progress ring described [above](#optional-target-count-counter-based-completion), resetting every calendar day. A day only counts toward the streak once its count reaches the target — never on partial progress, and the streak logic itself is completely unchanged, strictly binary per day either way. This mechanic is deliberately daily-only: weekly habits keep their existing single week-level completion with no quantity concept, since their commitment is "sometime this week," not a specific day. For a quantity habit, the Analysis screen (below) also shows a supplementary **average daily completion %** for the selected period — purely additive, never feeding into the streak.
+
 **Status is extensible.** Every habit has a `status` of `active` or `paused` — a string, not a boolean, specifically so a future third state (e.g. a "retired/graduated" habit you no longer need to track) can be added later without another breaking migration. Only Active/Paused exist today; all status changes are explicit, there's no automatic time-based transition.
 
 **Pausing** a habit (via its **···** menu) removes it from every daily-completion surface and from all streak-breaking logic — a paused habit can never be "missed." It stays reachable, one tap away, under the Habits section's **Paused** segment, and **Resume** always starts a brand-new tracking period with the streak reset to zero, never continuing the one before the pause. Unlimited pause/resume cycles are supported.
@@ -228,13 +244,14 @@ Habits are daily or weekly. Daily habits reset at local midnight; weekly habits 
 
 **The Analysis screen** (**···** → **Analysis** on any habit) shows, top to bottom: a header with current status; Quick Stats (current streak, best streak, completion rate) for whichever epoch is selected; an Epoch Selector chip row (**Now**, plus every closed epoch, most recent first); a day-by-day **Visual Consistency Grid** for that epoch; a Lifetime Summary aggregating every epoch (explicitly labeled as a sum across separate periods, never implied as one unbroken streak); and a collapsible Epoch History.
 
-The grid is a *categorical* consistency view, not a color-intensity heatmap, with five states distinguished by more than color alone (fill, border style, and an icon):
+The grid is a *categorical* consistency view, not a color-intensity heatmap, with states distinguished by more than color alone (fill, border style, and an icon):
 
 - **Completed** — filled, with a check
 - **Missed** — outlined, with a small dash (calm, not alarming — this is information, not a rebuke)
+- **Partial** — a daily-target quantity habit only: a past day with some progress but short of the target. Visually distinct from Missed (accent-tinted, dashed border, a small dot) and reads as "in progress," never as a failure — a day only ever shows this if it's genuinely in the past and genuinely partial; *today* with partial progress still renders as Future (below), exactly like an untouched today
 - **Not scheduled** — recessive/dashed, for any day the habit's own schedule didn't call for (e.g. Tuesday for a Mon/Wed/Fri habit) — never shown as missed
 - **Paused** — a spanning band, reserved for gaps *between* epochs; a single epoch's own grid structurally never contains one, since pausing is exactly what closes an epoch
-- **Future** — today (not yet elapsed) or later; never shown as missed, even if you haven't completed today's habit yet
+- **Future** — today (not yet elapsed) or later; never shown as missed, even if you haven't completed today's habit yet (or, for a quantity habit, haven't reached today's target yet)
 
 Rows follow Momentum's Saturday–Friday week and are grouped into collapsible month sections, most recent first, with older months loaded lazily as you scroll rather than rendering a multi-year history all at once. Weekly-frequency habits render one merged state per week instead of seven daily cells, since a weekly habit's actual commitment is "sometime this week," not a specific day.
 
@@ -337,10 +354,14 @@ src/
                                #   recurrence (occurrence-date generation), deadline urgency, streaks,
                                #   rollover/snapshot aggregation, retention eligibility, analytics,
                                #   habitSchedule (weekday due-ness), epochs (derived epoch/lifetime
-                               #   stats), habitGrid (Visual Consistency Grid day/week classification)
-    backup/backup.ts          # export/import/validate JSON backups, incl. v1 -> v2 -> v3 migration
+                               #   stats + average-daily-completion-%), habitGrid (Visual Consistency
+                               #   Grid day/week classification, incl. Partial), quantity (target/count
+                               #   clamp+percent helpers), habitProgress (target-aware completion
+                               #   interpretation for HabitCompletion rows)
+    backup/backup.ts          # export/import/validate JSON backups, incl. v1 -> v2 -> v3 -> v4 migration
     seed/seedData.ts          # dev-only sample data (never runs automatically)
-  hooks/                     # useGoals, useHabits (active/paused/single-habit queries), useTheme, useAppInit
+  hooks/                     # useGoals, useHabits (active/paused/single-habit queries), useTheme,
+                              #   useAppInit, useLongPress (tap-to-increment/hold-to-decrement gesture)
   components/                # ui/ primitives, goals/, habits/ (card, form, consistency grid), layout/
   screens/                   # HomeScreen, AnalyticsScreen, HistoryScreen (Activity), SettingsScreen,
                               #   HabitAnalysisScreen (lazy-loaded per-habit epoch/grid view)
@@ -353,7 +374,7 @@ src/
 npm run test
 ```
 
-The suite (Vitest) covers the business logic that actually matters to get right: custom week boundaries (including the Friday 23:59 → Saturday 00:00 transition, end-of-month, end-of-year, and a leap-year date), Late/active/expired goal-kind semantics, Home priority sorting (including the worked examples in this README), recurrence-occurrence generation and its idempotency, weekly rollover idempotency and multi-week-gap handling (via `fake-indexeddb`, exercising the real Dexie code path), the IndexedDB v1 → v2 → v3 schema migrations against a real seeded legacy database, retention-eligibility rules, Analytics time-range aggregation, and backup validation/migration/round-tripping — plus, for habits: pause/resume epoch mechanics through many cycles (via `fake-indexeddb`), derived epoch/lifetime statistics (including zero-completion and zero-duration edge cases), weekday due-date logic, and Visual Consistency Grid day-state classification (completed/missed/not-scheduled/future, and that a closed epoch's own grid never renders a paused band).
+The suite (Vitest) covers the business logic that actually matters to get right: custom week boundaries (including the Friday 23:59 → Saturday 00:00 transition, end-of-month, end-of-year, and a leap-year date), Late/active/expired goal-kind semantics, Home priority sorting (including the worked examples in this README), recurrence-occurrence generation and its idempotency, weekly rollover idempotency and multi-week-gap handling (via `fake-indexeddb`, exercising the real Dexie code path), the IndexedDB v1 → v2 → v3 → v4 schema migrations against a real seeded legacy database, retention-eligibility rules, Analytics time-range aggregation, and backup validation/migration/round-tripping — plus, for habits: pause/resume epoch mechanics through many cycles (via `fake-indexeddb`), derived epoch/lifetime statistics (including zero-completion and zero-duration edge cases), weekday due-date logic, and Visual Consistency Grid day-state classification (completed/missed/not-scheduled/future, and that a closed epoch's own grid never renders a paused band). Also covered: counter-based (target-count) completion for Tasks and daily Habits — increment/decrement/floor-at-0/at-target boundaries, downward-target-edit auto-completion, per-task-type rollover/expiry of in-progress counts, Recurring-occurrence count independence, the Grid's Partial state and the in-progress-today edge case specifically, the average-daily-completion-% metric (including its zero-denominator case), and that partial progress never contributes a fraction to Home priority, ranged Analytics, or the per-habit trailing completion-rate panel.
 
 ## Build & quality checks
 

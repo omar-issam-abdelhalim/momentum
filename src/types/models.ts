@@ -56,6 +56,16 @@ export interface Goal {
   recurringDefinitionId?: string
 
   archived: boolean
+
+  /**
+   * Optional counter-completion target. Undefined or 1 means today's exact
+   * single-tap-to-complete behavior (unchanged). When > 1, completion
+   * requires currentCount to reach targetCount via repeated increments —
+   * see lib/logic/quantity.ts and lib/db/goals.repo.ts#incrementGoalProgress.
+   */
+  targetCount?: number
+  /** Only ever set when targetCount > 1; otherwise left undefined, exactly like a pre-existing (binary) goal. Capped at targetCount. */
+  currentCount?: number
 }
 
 export type RecurrenceType = 'daily' | 'weekly'
@@ -82,6 +92,8 @@ export interface RecurringDefinition {
    * is what makes repeated runs idempotent and duplicate-proof.
    */
   lastGeneratedThroughISO: string | null
+  /** Copied onto each generated occurrence's own targetCount — see recurringRunner.ts#buildOccurrence. Mirrors how `priority` already flows through. */
+  targetCount?: number
 }
 
 export type HabitFrequency = 'daily' | 'weekly'
@@ -127,6 +139,14 @@ export interface Habit {
    * due-ness concept.
    */
   weekdays?: number[]
+  /**
+   * Optional daily counter-completion target. Meaningful only when
+   * frequency === 'daily'; always undefined/ignored for frequency ===
+   * 'weekly', which keeps its existing single week-level completion with no
+   * quantity mechanic. Undefined or 1 means today's exact single boolean
+   * per-day completion (unchanged). See lib/logic/habitProgress.ts.
+   */
+  dailyTarget?: number
   icon?: string
   order: number
   status: HabitStatus
@@ -141,6 +161,16 @@ export interface HabitCompletion {
   /** 'yyyy-MM-dd' for daily habits, weekId for weekly habits. */
   periodId: string
   completedAt: number
+  /**
+   * Progress count toward the habit's dailyTarget for this period. Undefined
+   * means either a legacy (pre-feature) row or a binary-habit row written
+   * going forward — both are permanently interpreted as "at target" (see
+   * lib/logic/habitProgress.ts#isCompletionAtTarget), since a row's mere
+   * existence has always meant "period complete" and there is no historical
+   * count to reconstruct. Only ever a real number for a counter habit
+   * (dailyTarget > 1), capped at that target.
+   */
+  count?: number
 }
 
 /**

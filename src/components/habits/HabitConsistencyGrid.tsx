@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Minus } from 'lucide-react'
+import { Check, Circle, Minus } from 'lucide-react'
 import { getTodayISO, getCurrentWeekId } from '@/lib/date/week'
 import {
   classifyDailyEpochGrid,
@@ -25,6 +25,10 @@ const LOAD_MORE_MONTHS = 3
 const DAY_STATE_STYLE: Record<DayState, string> = {
   completed: 'bg-accent text-white border border-accent',
   missed: 'border-2 border-danger/40 text-danger/70 bg-transparent',
+  // Distinct from 'missed' via fill, border style, and icon (never color
+  // alone) — reads as "in progress," reusing the same accent-tinted dashed
+  // language already used for a weekly habit's 'in-progress' week band.
+  partial: 'border-2 border-dashed border-accent/50 bg-accent-muted text-accent',
   'not-scheduled': 'border border-dashed border-border/50 bg-transparent',
   paused: 'border border-border-strong bg-[repeating-linear-gradient(45deg,transparent,transparent_2px,rgb(var(--border-strong))_2px,rgb(var(--border-strong))_3px)]',
   future: 'border border-border/30 bg-transparent',
@@ -39,6 +43,7 @@ function DayCell({ dateISO, state }: { dateISO: string; state: DayState }) {
     >
       {state === 'completed' && <Check size={11} strokeWidth={3} aria-hidden="true" />}
       {state === 'missed' && <Minus size={9} strokeWidth={3} aria-hidden="true" />}
+      {state === 'partial' && <Circle size={7} className="fill-current" aria-hidden="true" />}
       {(state === 'not-scheduled' || state === 'future') && (
         <span className="opacity-40">{dayNum}</span>
       )}

@@ -120,3 +120,21 @@ describe('sortGoals — worked examples from the product spec', () => {
     expect(goals).toEqual(copy)
   })
 })
+
+describe('Home priority atomicity — counter (target-count) goals', () => {
+  it('a partially-progressed counter goal sorts by its normal bucket, exactly like an equivalent non-counter goal — partial progress has no bearing on category or position', () => {
+    const lateCounter = makeGoal({
+      id: 'counter',
+      kind: 'scheduled',
+      scheduledDateISO: '2026-07-10',
+      targetCount: 5,
+      currentCount: 4, // one tap away from complete
+    })
+    const lateBinary = makeGoal({ id: 'binary', kind: 'scheduled', scheduledDateISO: '2026-07-15' })
+
+    expect(getPriorityBucket(lateCounter, TODAY)).toBe('late-scheduled')
+    // Same bucket, same secondary sort as an equivalent binary goal (oldest scheduled date first) —
+    // the near-complete counter goal does not jump the queue just because it is almost done.
+    expect(sortGoals([lateBinary, lateCounter], TODAY).map((g) => g.id)).toEqual(['counter', 'binary'])
+  })
+})

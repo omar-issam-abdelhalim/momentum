@@ -4,9 +4,11 @@ import {
   filterSnapshotsInRange,
   generatePlanningInsights,
   habitCompletionRate,
+  summarizeHabitAnalytics,
   weeklyCompletionSeries,
 } from './analytics'
 import { previousDayISO } from './streaks'
+import { getPreviousWeekId } from '@/lib/date/week'
 import type { Habit, HabitCompletion, WeeklySnapshot } from '@/types/models'
 
 function makeSnapshot(overrides: Partial<WeeklySnapshot>): WeeklySnapshot {
@@ -197,5 +199,39 @@ describe('habitCompletionRate', () => {
     }))
     const rate = habitCompletionRate(mwf, completions, 3, '2026-07-24', previousDayISO, { isDue })
     expect(rate).toBe(100) // all 3 due days (Mon/Wed/Fri) completed; Tue/Thu never counted
+  })
+})
+
+describe('summarizeHabitAnalytics — quantity habit atomicity', () => {
+  const quantityHabit: Habit = {
+    id: 'q1',
+    name: 'Drink water',
+    frequency: 'daily',
+    dailyTarget: 3,
+    order: 0,
+    status: 'active',
+    // Epoch starts exactly 07-20, giving a clean 3-day trailing window
+    // (07-20..07-22) bounded by earliestPeriodId inside summarizeHabitAnalytics.
+    epochs: [{ id: 'e1', startDate: new Date(2026, 6, 20).getTime(), endDate: null }],
+    createdAt: new Date(2026, 6, 20).getTime(),
+  }
+
+  it('never counts a partial-progress day as a hit in the trailing completion-rate window', () => {
+    const completions: HabitCompletion[] = [
+      { id: 'c1', habitId: 'q1', periodId: '2026-07-20', completedAt: 0, count: 3 }, // fully at target
+      { id: 'c2', habitId: 'q1', periodId: '2026-07-21', completedAt: 0, count: 1 }, // partial — must not count
+      { id: 'c3', habitId: 'q1', periodId: '2026-07-22', completedAt: 0, count: 3 }, // fully at target
+    ]
+
+    const [summary] = summarizeHabitAnalytics(
+      [quantityHabit],
+      completions,
+      '2026-07-22',
+      '2026-07-18',
+      previousDayISO,
+      getPreviousWeekId,
+    )
+    // 3-day trailing window (07-20..07-22): 2 real hits, not 3.
+    expect(summary.completionRatePct).toBe(67)
   })
 })

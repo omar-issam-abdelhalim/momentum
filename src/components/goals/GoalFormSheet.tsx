@@ -13,6 +13,8 @@ export interface GoalFormValues {
   deadlineISO: string
   recurrenceType: RecurrenceType
   weekdays: number[]
+  /** Blank/'1' = today's exact single-tap-to-complete behavior. */
+  targetCount: string
 }
 
 interface GoalFormSheetProps {
@@ -41,6 +43,7 @@ function emptyValues(): GoalFormValues {
     deadlineISO: '',
     recurrenceType: 'daily',
     weekdays: [],
+    targetCount: '',
   }
 }
 
@@ -53,6 +56,7 @@ function valuesFromGoal(goal: Goal): GoalFormValues {
     deadlineISO: goal.deadlineISO ?? '',
     recurrenceType: 'daily',
     weekdays: [],
+    targetCount: goal.targetCount && goal.targetCount > 1 ? String(goal.targetCount) : '',
   }
 }
 
@@ -80,6 +84,10 @@ export function GoalFormSheet({ open, onClose, onSubmit, initialGoal }: GoalForm
     }
     if (values.kind === 'recurring' && values.recurrenceType === 'weekly' && values.weekdays.length === 0) {
       setError('Pick at least one day of the week.')
+      return
+    }
+    if (values.targetCount.trim() !== '' && Number(values.targetCount) < 1) {
+      setError('Target count must be at least 1.')
       return
     }
     onSubmit(values)
@@ -256,6 +264,27 @@ export function GoalFormSheet({ open, onClose, onSubmit, initialGoal }: GoalForm
             </div>
           </div>
         )}
+
+        <div>
+          <label htmlFor="goal-target-count" className="mb-1.5 block text-xs font-medium text-ink-muted">
+            Target count (optional)
+          </label>
+          <input
+            id="goal-target-count"
+            type="number"
+            min={1}
+            step={1}
+            inputMode="numeric"
+            value={values.targetCount}
+            onChange={(e) => setValues((v) => ({ ...v, targetCount: e.target.value }))}
+            placeholder="1 (single completion)"
+            className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-accent"
+          />
+          <p className="mt-1 text-[11px] text-ink-faint">
+            Leave blank for a single tap to complete. Set a number to require reaching that count through repeated
+            taps, tracked with a progress ring — hold to undo one.
+          </p>
+        </div>
 
         {error && <p className="text-xs text-danger">{error}</p>}
 

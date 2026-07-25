@@ -2,6 +2,7 @@ import type { Habit, HabitCompletion, WeeklySnapshot } from '@/types/models'
 import { formatDateOnly, formatWeekRangeLabel, getWeekId } from '@/lib/date/week'
 import type { ResolvedRange } from '@/lib/date/ranges'
 import { computeEpochStats, getOpenEpoch } from './epochs'
+import { filterCompletionsAtTarget } from './habitProgress'
 import { isHabitDueOnDate } from './habitSchedule'
 
 /** Snapshots whose selected range overlaps [startMs, endMs] (attributed by weekStart — see lib/date/ranges.ts). `range.startMs === null` (All time) matches everything. */
@@ -298,13 +299,18 @@ export function summarizeHabitAnalytics(
         : getWeekId(new Date(openEpoch.startDate))
       : undefined
 
+    // Only completions that actually reach the habit's target count as a hit
+    // here — a quantity habit's partial-progress day must never inflate this
+    // trailing-window rate (see lib/logic/habitProgress.ts for why a plain
+    // existence check is no longer sufficient).
+    const targetAwareCompletions = filterCompletionsAtTarget(completions, habit)
     const rate =
       habit.frequency === 'daily'
-        ? habitCompletionRate(habit, completions, 30, todayISO, getPreviousDayISO, {
+        ? habitCompletionRate(habit, targetAwareCompletions, 30, todayISO, getPreviousDayISO, {
             earliestPeriodId,
             isDue: (periodId) => isHabitDueOnDate(habit, periodId),
           })
-        : habitCompletionRate(habit, completions, 12, currentWeekId, getPreviousWeekId, { earliestPeriodId })
+        : habitCompletionRate(habit, targetAwareCompletions, 12, currentWeekId, getPreviousWeekId, { earliestPeriodId })
 
     return {
       habitId: habit.id,

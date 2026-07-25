@@ -8,6 +8,7 @@ import {
   parseDateOnly,
 } from '@/lib/date/week'
 import { isHabitDueOnDate } from '@/lib/logic/habitSchedule'
+import { isCompletionAtTarget, progressCountForRecord, targetForHabit } from '@/lib/logic/habitProgress'
 import type { Habit, HabitCompletion, HabitEpoch } from '@/types/models'
 
 /**
@@ -166,10 +167,12 @@ export function computeEpochStats(
 
   const startISO = formatDateOnly(new Date(epoch.startDate))
   const endISO = epoch.endDate ? formatDateOnly(new Date(epoch.endDate)) : null
+  const target = targetForHabit(habit)
   const completedSet = new Set(
     completions
       .filter((c) => c.habitId === habit.id)
       .filter((c) => c.periodId >= startISO && (endISO === null || c.periodId <= endISO))
+      .filter((c) => isCompletionAtTarget(c, target))
       .map((c) => c.periodId),
   )
 
@@ -194,6 +197,40 @@ export function computeEpochStats(
     currentStreak: current,
     bestStreak: best,
   }
+}
+
+/**
+ * Average of (day's count ÷ day's target) across the epoch's actual due
+ * days, capped at 1 per day and expressed as a whole-number percentage —
+ * purely additive supplementary metric for quantity (daily-target > 1)
+ * habits. Never fed into completionRatePct/streak logic above, which stay
+ * exactly as they are for every habit, including quantity habits. Returns
+ * null on a zero-denominator (no due days yet) rather than fabricating a
+ * rate, matching completionRatePct's own convention. Meaningless (and never
+ * called by the UI) for a binary habit or a weekly-frequency habit.
+ */
+export function computeAverageDailyCompletionPct(
+  habit: Habit,
+  epoch: HabitEpoch,
+  completions: HabitCompletion[],
+  todayISO: string = getTodayISO(),
+): number | null {
+  const target = targetForHabit(habit)
+  const duePeriods = dueDayPeriodsForEpoch(habit, epoch, todayISO)
+  if (duePeriods.length === 0) return null
+
+  const startISO = formatDateOnly(new Date(epoch.startDate))
+  const endISO = epoch.endDate ? formatDateOnly(new Date(epoch.endDate)) : null
+  const recordByPeriod = new Map(
+    completions
+      .filter((c) => c.habitId === habit.id)
+      .filter((c) => c.periodId >= startISO && (endISO === null || c.periodId <= endISO))
+      .map((c) => [c.periodId, c] as const),
+  )
+
+  const ratios = duePeriods.map((p) => Math.min(1, progressCountForRecord(recordByPeriod.get(p), target) / target))
+  const avg = ratios.reduce((sum, r) => sum + r, 0) / ratios.length
+  return Math.round(avg * 100)
 }
 
 export interface LifetimeSummary {

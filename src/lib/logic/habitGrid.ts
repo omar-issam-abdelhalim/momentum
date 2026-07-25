@@ -1,5 +1,6 @@
 import { addDays, format, formatDateOnly, getNextWeekId, getWeekId, parseDateOnly } from '@/lib/date/week'
 import { isHabitDueOnDate } from '@/lib/logic/habitSchedule'
+import { progressCountForRecord, targetForHabit } from '@/lib/logic/habitProgress'
 import type { Habit, HabitCompletion, HabitEpoch } from '@/types/models'
 
 /**
@@ -10,8 +11,16 @@ import type { Habit, HabitCompletion, HabitEpoch } from '@/types/models'
  * excludes the paused gap that closed it by definition, so 'paused' would
  * only ever apply to a *between-epochs* view, which this app never renders
  * (the Epoch Selector always shows exactly one epoch at a time).
+ *
+ * 'partial' exists only for a quantity (daily-target > 1) habit: a past,
+ * scheduled day with count > 0 but < target. It reads as "in progress," not
+ * a failure — distinct from 'missed' via fill/border/icon (see
+ * HabitConsistencyGrid.tsx), never via color alone. A quantity habit's
+ * *today*, even with partial progress, still classifies as 'future' below
+ * (never 'partial', never 'missed') — same rule v2.1.0 established for
+ * binary habits, just extended rather than replaced.
  */
-export type DayState = 'completed' | 'missed' | 'not-scheduled' | 'paused' | 'future'
+export type DayState = 'completed' | 'missed' | 'not-scheduled' | 'paused' | 'future' | 'partial'
 
 export interface GridDayCell {
   dateISO: string
@@ -42,16 +51,21 @@ function classifyDailyDay(
   startISO: string,
   endISO: string | null,
   todayISO: string,
-  completedSet: Set<string>,
+  countsByDate: Map<string, number>,
+  target: number,
 ): DayState {
   if (dateISO < startISO) return 'not-scheduled'
   if (endISO !== null && dateISO > endISO) return 'not-scheduled'
   if (!isHabitDueOnDate(habit, dateISO)) return 'not-scheduled'
-  if (completedSet.has(dateISO)) return 'completed'
+  const count = countsByDate.get(dateISO) ?? 0
+  if (count >= target) return 'completed'
   // "Future" is defined as today-or-later — today's day isn't over yet, so
-  // an incomplete today must read the same calm, neutral way as a day that
-  // hasn't arrived, never as an accusatory "missed" before the day is done.
+  // an incomplete today (untouched, or with partial quantity progress) must
+  // read the same calm, neutral way as a day that hasn't arrived: never as
+  // an accusatory "missed" before the day is done, and never as "partial"
+  // either — that state is reserved for a *past* under-target day.
   if (dateISO >= todayISO) return 'future'
+  if (count > 0) return 'partial'
   return 'missed'
 }
 
@@ -71,8 +85,11 @@ export function classifyDailyEpochGrid(
 ): GridDayWeekRow[] {
   const startISO = formatDateOnly(new Date(epoch.startDate))
   const endISO = epoch.endDate ? formatDateOnly(new Date(epoch.endDate)) : null
-  const completedSet = new Set(
-    completions.filter((c) => c.habitId === habit.id && c.periodId >= startISO).map((c) => c.periodId),
+  const target = targetForHabit(habit)
+  const countsByDate = new Map(
+    completions
+      .filter((c) => c.habitId === habit.id && c.periodId >= startISO)
+      .map((c) => [c.periodId, progressCountForRecord(c, target)] as const),
   )
 
   const lastRenderedISO = endISO !== null ? (endISO > todayISO ? todayISO : endISO) : todayISO
@@ -87,7 +104,7 @@ export function classifyDailyEpochGrid(
     const days: GridDayCell[] = []
     for (let i = 0; i < 7; i++) {
       const dateISO = formatDateOnly(addDays(weekStart, i))
-      days.push({ dateISO, state: classifyDailyDay(habit, dateISO, startISO, endISO, todayISO, completedSet) })
+      days.push({ dateISO, state: classifyDailyDay(habit, dateISO, startISO, endISO, todayISO, countsByDate, target) })
     }
     rows.push({ weekId: weekCursor, days })
     weekCursor = getNextWeekId(weekCursor)

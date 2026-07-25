@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import Dexie from 'dexie'
 import { describe, expect, it } from 'vitest'
+import { isCompletionAtTarget, targetForHabit } from '@/lib/logic/habitProgress'
 
 const DB_NAME = 'momentum-db'
 
@@ -151,6 +152,84 @@ describe('MomentumDB v2 -> v3 migration', () => {
     // Completion history is untouched by the migration.
     const completions = await upgraded.habitCompletions.where('habitId').equals('active-habit').toArray()
     expect(completions).toHaveLength(1)
+
+    await upgraded.delete()
+  })
+})
+
+describe('MomentumDB v3 -> v4 migration (counter-based completion)', () => {
+  it('is a pure no-op: no .upgrade() runs, every new field resolves to undefined, and pre-existing completion state is unaffected', async () => {
+    const legacy = new Dexie(DB_NAME)
+    legacy.version(1).stores({
+      goals: 'id, type, currentWeekId, originalWeekId, dateISO, deadlineISO, createdAt',
+      habits: 'id, frequency, order',
+      habitCompletions: 'id, habitId, periodId, [habitId+periodId], completedAt',
+      weeklySnapshots: 'weekId, weekStart',
+      settings: 'id',
+    })
+    legacy.version(2).stores({
+      goals:
+        'id, kind, currentWeekId, originalWeekId, scheduledDateISO, deadlineISO, createdAt, recurringDefinitionId',
+      recurringDefinitions: 'id, active, createdAt',
+      habits: 'id, frequency, order',
+      habitCompletions: 'id, habitId, periodId, [habitId+periodId], completedAt',
+      weeklySnapshots: 'weekId, weekStart',
+      settings: 'id',
+    })
+    legacy.version(3).stores({
+      goals:
+        'id, kind, currentWeekId, originalWeekId, scheduledDateISO, deadlineISO, createdAt, recurringDefinitionId',
+      recurringDefinitions: 'id, active, createdAt',
+      habits: 'id, frequency, order',
+      habitCompletions: 'id, habitId, periodId, [habitId+periodId], completedAt',
+      weeklySnapshots: 'weekId, weekStart',
+      settings: 'id',
+    })
+    await legacy.open()
+
+    await legacy.table('goals').add({
+      id: 'g1',
+      title: 'Existing scheduled task',
+      kind: 'scheduled',
+      scheduledDateISO: '2026-07-01',
+      createdAt: 1,
+      completedAt: null,
+      completed: false,
+      rolledOver: false,
+      rolloverCount: 0,
+      archived: false,
+    })
+    await legacy.table('habits').add({
+      id: 'h1',
+      name: 'Existing habit',
+      frequency: 'daily',
+      order: 0,
+      status: 'active',
+      epochs: [{ id: 'e1', startDate: 1000, endDate: null }],
+      createdAt: 1000,
+    })
+    await legacy.table('habitCompletions').add({ id: 'c1', habitId: 'h1', periodId: '2026-07-01', completedAt: 1000 })
+    legacy.close()
+
+    const { MomentumDB } = await import('./db')
+    const upgraded = new MomentumDB()
+    await upgraded.open()
+
+    const goal = await upgraded.goals.get('g1')
+    expect(goal?.targetCount).toBeUndefined()
+    expect(goal?.currentCount).toBeUndefined()
+    expect(goal?.completed).toBe(false)
+    expect(goal?.title).toBe('Existing scheduled task') // untouched
+
+    const habit = await upgraded.habits.get('h1')
+    expect(habit?.dailyTarget).toBeUndefined()
+
+    const completion = await upgraded.habitCompletions.get('c1')
+    expect(completion?.count).toBeUndefined()
+    // The pre-existing (pre-feature) completion row still reads as fully
+    // complete under the new target-aware interpretation — no reinterpretation
+    // of existing completion state.
+    expect(isCompletionAtTarget(completion, habit ? targetForHabit(habit) : 1)).toBe(true)
 
     await upgraded.delete()
   })

@@ -1,7 +1,18 @@
 import 'fake-indexeddb/auto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from './db'
-import { createHabit, deleteHabit, getActiveHabits, getPausedHabits, pauseHabit, resumeHabit } from './habits.repo'
+import {
+  createHabit,
+  decrementHabitProgress,
+  deleteHabit,
+  getActiveHabits,
+  getPausedHabits,
+  incrementHabitProgress,
+  isHabitCompleteForCurrentPeriod,
+  pauseHabit,
+  resumeHabit,
+  updateHabit,
+} from './habits.repo'
 
 async function resetDb() {
   await db.goals.clear()
@@ -155,5 +166,82 @@ describe('deleteHabit', () => {
 
     expect(await db.habits.get(habit.id)).toBeUndefined()
     expect(await db.habitCompletions.where('habitId').equals(habit.id).count()).toBe(0)
+  })
+})
+
+describe('daily target (quantity) habits', () => {
+  it('only applies dailyTarget to daily-frequency habits — weekly habits ignore it entirely', async () => {
+    const daily = await createHabit({ name: 'Drink water', frequency: 'daily', dailyTarget: 5 })
+    expect(daily.dailyTarget).toBe(5)
+
+    const weekly = await createHabit({ name: 'Review', frequency: 'weekly', dailyTarget: 5 })
+    expect(weekly.dailyTarget).toBeUndefined()
+  })
+
+  it('increments today\'s progress up to target and reports completion exactly once', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 20))
+    const habit = await createHabit({ name: 'Drink water', frequency: 'daily', dailyTarget: 3 })
+
+    expect((await incrementHabitProgress(habit)).completed).toBe(false)
+    expect((await incrementHabitProgress(habit)).completed).toBe(false)
+    expect((await incrementHabitProgress(habit)).completed).toBe(true)
+    expect(await isHabitCompleteForCurrentPeriod(habit)).toBe(true)
+
+    const record = await db.habitCompletions.where('[habitId+periodId]').equals([habit.id, '2026-07-20']).first()
+    expect(record?.count).toBe(3)
+  })
+
+  it('caps stored count at target — overshoot beyond target is a no-op', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 20))
+    const habit = await createHabit({ name: 'Drink water', frequency: 'daily', dailyTarget: 2 })
+    await incrementHabitProgress(habit)
+    await incrementHabitProgress(habit)
+    await incrementHabitProgress(habit) // third tap, already at target
+
+    const record = await db.habitCompletions.where('[habitId+periodId]').equals([habit.id, '2026-07-20']).first()
+    expect(record?.count).toBe(2)
+  })
+
+  it('decrements today\'s progress floored at 0, deleting the row entirely once it reaches 0', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 20))
+    const habit = await createHabit({ name: 'Drink water', frequency: 'daily', dailyTarget: 3 })
+    await incrementHabitProgress(habit)
+
+    await decrementHabitProgress(habit)
+    const record = await db.habitCompletions.where('[habitId+periodId]').equals([habit.id, '2026-07-20']).first()
+    expect(record).toBeUndefined()
+
+    // Decrementing again with no row at all is a safe no-op.
+    await decrementHabitProgress(habit)
+    expect(await isHabitCompleteForCurrentPeriod(habit)).toBe(false)
+  })
+
+  it('un-completes a fully-at-target day when decremented back below target', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 20))
+    const habit = await createHabit({ name: 'Drink water', frequency: 'daily', dailyTarget: 2 })
+    await incrementHabitProgress(habit)
+    await incrementHabitProgress(habit)
+    expect(await isHabitCompleteForCurrentPeriod(habit)).toBe(true)
+
+    await decrementHabitProgress(habit)
+    expect(await isHabitCompleteForCurrentPeriod(habit)).toBe(false)
+  })
+
+  it('a legacy binary completion row (no count field) still reads as complete after dailyTarget is set later — no reinterpretation of existing completion state', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 20))
+    const habit = await createHabit({ name: 'Read', frequency: 'daily' }) // binary
+    await db.habitCompletions.add({ id: 'legacy1', habitId: habit.id, periodId: '2026-07-20', completedAt: Date.now() })
+    expect(await isHabitCompleteForCurrentPeriod(habit)).toBe(true)
+
+    // Habit is converted to a quantity habit after the fact.
+    await updateHabit(habit.id, { dailyTarget: 5 })
+    const updated = await db.habits.get(habit.id)
+    const stillComplete = updated ? await isHabitCompleteForCurrentPeriod(updated) : false
+    expect(stillComplete).toBe(true)
   })
 })

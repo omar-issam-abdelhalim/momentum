@@ -23,6 +23,8 @@ export interface HabitFormValues {
   /** Only meaningful when frequency === 'daily'. Empty = due every day (unrestricted, original behavior). */
   weekdays: number[]
   icon: string
+  /** Only meaningful when frequency === 'daily'. Blank/'1' = today's exact single boolean per-day completion. */
+  dailyTarget: string
 }
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -48,7 +50,7 @@ export const HABIT_ICONS: Record<string, LucideIcon> = {
 }
 
 function emptyValues(): HabitFormValues {
-  return { name: '', description: '', frequency: 'daily', weekdays: [], icon: 'sparkles' }
+  return { name: '', description: '', frequency: 'daily', weekdays: [], icon: 'sparkles', dailyTarget: '' }
 }
 
 function valuesFromHabit(habit: Habit): HabitFormValues {
@@ -58,6 +60,7 @@ function valuesFromHabit(habit: Habit): HabitFormValues {
     frequency: habit.frequency,
     weekdays: habit.weekdays ?? [],
     icon: habit.icon ?? 'sparkles',
+    dailyTarget: habit.frequency === 'daily' && habit.dailyTarget && habit.dailyTarget > 1 ? String(habit.dailyTarget) : '',
   }
 }
 
@@ -85,7 +88,15 @@ export function HabitFormSheet({ open, onClose, onSubmit, initialHabit }: HabitF
       setError('Pick at least one day of the week.')
       return
     }
-    onSubmit({ ...values, weekdays: values.frequency === 'daily' && restrictDays ? values.weekdays : [] })
+    if (values.frequency === 'daily' && values.dailyTarget.trim() !== '' && Number(values.dailyTarget) < 1) {
+      setError('Daily target must be at least 1.')
+      return
+    }
+    onSubmit({
+      ...values,
+      weekdays: values.frequency === 'daily' && restrictDays ? values.weekdays : [],
+      dailyTarget: values.frequency === 'daily' ? values.dailyTarget : '',
+    })
   }
 
   const toggleWeekday = (day: number) => {
@@ -201,6 +212,29 @@ export function HabitFormSheet({ open, onClose, onSubmit, initialHabit }: HabitF
               </div>
             )}
           </fieldset>
+        )}
+
+        {values.frequency === 'daily' && (
+          <div>
+            <label htmlFor="habit-daily-target" className="mb-1.5 block text-xs font-medium text-ink-muted">
+              Daily target (optional)
+            </label>
+            <input
+              id="habit-daily-target"
+              type="number"
+              min={1}
+              step={1}
+              inputMode="numeric"
+              value={values.dailyTarget}
+              onChange={(e) => setValues((v) => ({ ...v, dailyTarget: e.target.value }))}
+              placeholder="1 (single completion)"
+              className="w-full rounded-md border border-border bg-surface px-3 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-accent"
+            />
+            <p className="mt-1 text-[11px] text-ink-faint">
+              Leave blank for a single tap to complete each day. Set a number to require reaching that count each
+              day, tracked with a progress ring — hold to undo one.
+            </p>
+          </div>
         )}
 
         <fieldset>

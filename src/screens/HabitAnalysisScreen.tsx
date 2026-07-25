@@ -6,6 +6,7 @@ import { resumeHabit } from '@/lib/db/habits.repo'
 import { formatDateOnly, getCurrentWeekId, getTodayISO } from '@/lib/date/week'
 import { formatShortDate } from '@/lib/date/format'
 import {
+  computeAverageDailyCompletionPct,
   computeEpochStats,
   computeLifetimeSummary,
   defaultEpochSelectionId,
@@ -13,6 +14,7 @@ import {
   getOpenEpoch,
   resolveEpochSelection,
 } from '@/lib/logic/epochs'
+import { targetForHabit } from '@/lib/logic/habitProgress'
 import { HabitConsistencyGrid } from '@/components/habits/HabitConsistencyGrid'
 import { Button } from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
@@ -79,6 +81,12 @@ export function HabitAnalysisScreen({ habitId, onBack }: HabitAnalysisScreenProp
     return computeLifetimeSummary(habit, completions, todayISO, currentWeekId)
   }, [habit, completions, todayISO, currentWeekId])
 
+  const isQuantityHabit = !!habit && habit.frequency === 'daily' && targetForHabit(habit) > 1
+  const averageCompletionPct = useMemo(() => {
+    if (!habit || !selectedEpoch || !completions || !isQuantityHabit) return null
+    return computeAverageDailyCompletionPct(habit, selectedEpoch, completions, todayISO)
+  }, [habit, selectedEpoch, completions, todayISO, isQuantityHabit])
+
   if (!habit || !completions) {
     return <div className="fixed inset-0 z-50 bg-surface" aria-busy="true" />
   }
@@ -135,6 +143,12 @@ export function HabitAnalysisScreen({ habitId, onBack }: HabitAnalysisScreenProp
             <StatTile label="Best streak" value={String(selectedStats?.bestStreak ?? 0)} icon={Target} />
             <StatTile label="Completion" value={pctLabel(selectedStats?.completionRatePct ?? null)} icon={TrendingUp} />
           </div>
+          {isQuantityHabit && (
+            <p className="mt-2.5 text-[11px] text-ink-faint">
+              Avg daily completion: <span className="font-semibold text-ink">{pctLabel(averageCompletionPct)}</span>{' '}
+              this period — a supplementary quantity metric, separate from the streak above.
+            </p>
+          )}
         </section>
 
         <section aria-labelledby="epoch-selector-heading" className="mb-5">

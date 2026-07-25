@@ -2,12 +2,18 @@ import { db } from './db'
 import { createId } from '@/lib/id'
 import type { Priority, RecurrenceType, RecurringDefinition } from '@/types/models'
 
+function normalizeTargetCount(targetCount: number | null | undefined): number | undefined {
+  return targetCount && targetCount > 1 ? Math.floor(targetCount) : undefined
+}
+
 export interface CreateRecurringDefinitionInput {
   title: string
   description?: string
   recurrenceType: RecurrenceType
   weekdays?: number[]
   priority?: Priority
+  /** Copied onto each generated occurrence's own targetCount. Unset/1 = binary for every occurrence. */
+  targetCount?: number
 }
 
 export async function createRecurringDefinition(input: CreateRecurringDefinitionInput): Promise<RecurringDefinition> {
@@ -21,6 +27,7 @@ export async function createRecurringDefinition(input: CreateRecurringDefinition
     active: true,
     createdAt: Date.now(),
     lastGeneratedThroughISO: null,
+    targetCount: normalizeTargetCount(input.targetCount),
   }
   await db.recurringDefinitions.add(def)
   return def
@@ -32,6 +39,7 @@ export interface UpdateRecurringDefinitionInput {
   recurrenceType?: RecurrenceType
   weekdays?: number[]
   priority?: Priority
+  targetCount?: number | null
 }
 
 export async function updateRecurringDefinition(id: string, input: UpdateRecurringDefinitionInput): Promise<void> {
@@ -41,6 +49,7 @@ export async function updateRecurringDefinition(id: string, input: UpdateRecurri
   if (input.recurrenceType !== undefined) patch.recurrenceType = input.recurrenceType
   if (input.weekdays !== undefined) patch.weekdays = [...input.weekdays].sort()
   if (input.priority !== undefined) patch.priority = input.priority
+  if (input.targetCount !== undefined) patch.targetCount = normalizeTargetCount(input.targetCount)
   await db.recurringDefinitions.update(id, patch)
 }
 

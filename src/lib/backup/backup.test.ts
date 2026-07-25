@@ -200,6 +200,28 @@ describe('validateBackupFile', () => {
     const result = validateBackupFile(backup)
     expect(result.valid).toBe(true)
   })
+
+  it('accepts a well-formed v4 backup with counter-completion fields populated', () => {
+    const backup = validBackup()
+    backup.schemaVersion = 4
+    backup.data.goals[0].targetCount = 5
+    backup.data.goals[0].currentCount = 3
+    backup.data.habits = [
+      {
+        id: 'h1',
+        name: 'Read',
+        frequency: 'daily',
+        dailyTarget: 3,
+        order: 0,
+        status: 'active',
+        epochs: [{ id: 'e1', startDate: 0, endDate: null }],
+        createdAt: 0,
+      },
+    ]
+    backup.data.habitCompletions[0].count = 2
+    const result = validateBackupFile(backup)
+    expect(result.valid).toBe(true)
+  })
 })
 
 describe('migrateBackupToLatest', () => {
@@ -348,5 +370,68 @@ describe('importBackup', () => {
     const rebuiltHabit = rebuilt.data.habits.find((h) => h.id === 'h1')
     expect(rebuiltHabit?.status).toBe('paused')
     expect(rebuiltHabit?.epochs).toHaveLength(2)
+  })
+
+  it('imports a v3 (pre-feature) backup cleanly — counter fields resolve to undefined, exactly binary behavior', async () => {
+    const backup = validBackup()
+    backup.schemaVersion = 3
+    backup.data.habits = [
+      {
+        id: 'h1',
+        name: 'Read',
+        frequency: 'daily',
+        order: 0,
+        status: 'active',
+        epochs: [{ id: 'e1', startDate: 0, endDate: null }],
+        createdAt: 0,
+      },
+    ]
+    await importBackup(backup)
+
+    const goal = await db.goals.get('g1')
+    expect(goal?.targetCount).toBeUndefined()
+    expect(goal?.currentCount).toBeUndefined()
+
+    const habit = await db.habits.get('h1')
+    expect(habit?.dailyTarget).toBeUndefined()
+
+    const completion = await db.habitCompletions.get('c1')
+    expect(completion?.count).toBeUndefined()
+  })
+
+  it('round-trips a v4 backup with counter-completion fields populated', async () => {
+    const backup = validBackup()
+    backup.schemaVersion = 4
+    backup.data.goals[0].targetCount = 5
+    backup.data.goals[0].currentCount = 3
+    backup.data.habits = [
+      {
+        id: 'h1',
+        name: 'Read',
+        frequency: 'daily',
+        dailyTarget: 3,
+        order: 0,
+        status: 'active',
+        epochs: [{ id: 'e1', startDate: 0, endDate: null }],
+        createdAt: 0,
+      },
+    ]
+    backup.data.habitCompletions[0].count = 2
+    await importBackup(backup)
+
+    const goal = await db.goals.get('g1')
+    expect(goal?.targetCount).toBe(5)
+    expect(goal?.currentCount).toBe(3)
+
+    const habit = await db.habits.get('h1')
+    expect(habit?.dailyTarget).toBe(3)
+
+    const completion = await db.habitCompletions.get('c1')
+    expect(completion?.count).toBe(2)
+
+    const rebuilt = await buildBackup()
+    expect(rebuilt.data.goals[0].targetCount).toBe(5)
+    expect(rebuilt.data.habits[0].dailyTarget).toBe(3)
+    expect(rebuilt.data.habitCompletions[0].count).toBe(2)
   })
 })

@@ -3,7 +3,7 @@ import { createId } from '@/lib/id'
 import { APP_CONFIG } from '@/config/app.config'
 import type { AppSettings, BackupFile, Goal, Habit, HabitCompletion, RecurringDefinition, WeeklySnapshot } from '@/types/models'
 
-const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3]
+const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3, 4]
 
 export async function buildBackup(): Promise<BackupFile> {
   const [goals, recurringDefinitions, habits, habitCompletions, weeklySnapshots, settings] = await Promise.all([

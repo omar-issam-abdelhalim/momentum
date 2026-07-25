@@ -48,6 +48,13 @@ describe('applyRollover', () => {
     goal = applyRollover(goal, '2026-07-25')
     expect(goal.rolloverCount).toBe(3)
   })
+
+  it('preserves a counter goal\'s targetCount/currentCount unchanged across rollover', () => {
+    const goal = makeGoal({ id: 'a', targetCount: 5, currentCount: 3 })
+    const rolled = applyRollover(goal, '2026-07-25')
+    expect(rolled.targetCount).toBe(5)
+    expect(rolled.currentCount).toBe(3)
+  })
 })
 
 describe('buildWeeklySnapshot — weekly goals', () => {

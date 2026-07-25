@@ -25,6 +25,10 @@ function buildOccurrence(def: RecurringDefinition, dateISO: string): Goal {
     rolloverCount: 0,
     recurringDefinitionId: def.id,
     archived: false,
+    // Each occurrence is a fresh object with its own independent count,
+    // starting at 0 — a Late occurrence's count never leaks into the next.
+    targetCount: def.targetCount,
+    currentCount: def.targetCount && def.targetCount > 1 ? 0 : undefined,
   }
 }
 
