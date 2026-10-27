@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Clock, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
+import { Check, ChevronDown, Clock, MoreHorizontal, Pencil, RotateCcw, Trash2 } from 'lucide-react'
 import type { Goal } from '@/types/models'
 import { getDeadlineUrgency, URGENCY_LABEL } from '@/lib/logic/deadline'
 import { isLate, lateDays } from '@/lib/logic/goalKind'
@@ -8,6 +8,8 @@ import { formatShortDate } from '@/lib/date/format'
 import { getTodayISO } from '@/lib/date/week'
 import { ActionSheet } from '@/components/ui/ActionSheet'
 import { ProgressRing } from '@/components/ui/ProgressRing'
+import { LinkifiedText } from '@/components/ui/LinkifiedText'
+import { noteTextPreview } from '@/lib/logic/notesText'
 import { usePressHandlers } from '@/hooks/useLongPress'
 
 interface GoalCardProps {
@@ -35,6 +37,7 @@ const KIND_LABEL: Record<Goal['kind'], string> = {
 
 export function GoalCard({ goal, onToggleComplete, onIncrement, onDecrement, onEdit, onDelete }: GoalCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [notesOpen, setNotesOpen] = useState(false)
   const todayISO = getTodayISO()
   const urgency = getDeadlineUrgency(goal.deadlineISO, todayISO)
   const late = isLate(goal, todayISO)
@@ -82,7 +85,32 @@ export function GoalCard({ goal, onToggleComplete, onIncrement, onDecrement, onE
 
       <div className="min-w-0 flex-1">
         <p className={`text-sm font-medium text-ink ${goal.completed ? 'line-through' : ''}`}>{goal.title}</p>
-        {goal.description && <p className="mt-0.5 truncate text-xs text-ink-muted">{goal.description}</p>}
+        {goal.description && (
+          <>
+            <button
+              type="button"
+              onClick={() => setNotesOpen((open) => !open)}
+              aria-expanded={notesOpen}
+              aria-label={notesOpen ? 'Hide notes' : 'Show notes'}
+              className="mt-0.5 flex w-full min-w-0 items-center gap-1 text-left text-xs text-ink-muted"
+            >
+              <span className={`min-w-0 flex-1 ${notesOpen ? 'font-medium' : 'truncate'}`}>
+                {notesOpen ? 'Notes' : noteTextPreview(goal.description)}
+              </span>
+              <ChevronDown
+                size={14}
+                aria-hidden="true"
+                className={`shrink-0 text-ink-faint transition-transform ${notesOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {notesOpen && (
+              <LinkifiedText
+                text={goal.description}
+                className="mt-1.5 rounded-md bg-surface-sunken px-2.5 py-2 text-xs leading-relaxed text-ink-muted"
+              />
+            )}
+          </>
+        )}
 
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-medium text-ink-muted">
