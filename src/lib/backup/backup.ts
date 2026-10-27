@@ -310,3 +310,160 @@ export async function importBackup(rawBackup: BackupFile): Promise<void> {
     },
   )
 }
+
+// --- additive merge ("Add from file") ---------------------------------------
+
+export interface MergeCounts {
+  added: number
+  skipped: number
+}
+
+export interface MergeSummary {
+  goals: MergeCounts
+  recurringDefinitions: MergeCounts
+  habits: MergeCounts
+  habitCompletions: MergeCounts
+  weeklySnapshots: MergeCounts
+}
+
+export interface MergePlan {
+  summary: MergeSummary
+  toAdd: Omit<BackupFile['data'], 'settings'>
+}
+
+type CurrentData = Pick<BackupFile['data'], 'goals' | 'recurringDefinitions' | 'habits' | 'habitCompletions' | 'weeklySnapshots'>
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
+/** Human summary of what "Add from file" adds, e.g. "133 tasks, 3 recurring tasks and 2 habits". */
+export function describeMergeAdds(summary: MergeSummary): string {
+  const parts = [
+    summary.goals.added && plural(summary.goals.added, 'task'),
+    summary.recurringDefinitions.added && plural(summary.recurringDefinitions.added, 'recurring task'),
+    summary.habits.added && plural(summary.habits.added, 'habit'),
+    summary.habitCompletions.added && plural(summary.habitCompletions.added, 'habit check-in'),
+    summary.weeklySnapshots.added && plural(summary.weeklySnapshots.added, 'week of analytics'),
+  ].filter(Boolean) as string[]
+  if (parts.length <= 1) return parts[0] ?? 'nothing'
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+}
+
+/** Total records a merge would add — 0 means the file brings nothing new. */
+export function mergeAddedTotal(summary: MergeSummary): number {
+  return Object.values(summary).reduce((sum, c) => sum + c.added, 0)
+}
+
+/**
+ * Pure: decides what an additive merge of `incoming` into `current` would add.
+ * Nothing already present is ever changed or removed:
+ *   - goals, recurring definitions, habits: added only if their id is new.
+ *   - habit completions: added only if their id is new, no completion already
+ *     exists for the same habit + period, and their habit exists after the merge.
+ *   - weekly snapshots: added only for weeks that have no snapshot yet, so a
+ *     week's analytics are never counted twice.
+ *   - settings: never touched (theme, rollover cursor, onboarding stay as they are).
+ * New habits are appended after existing ones, keeping their relative order.
+ * `incoming` must already be validated; it is migrated to the current schema here.
+ */
+export function planBackupMerge(current: CurrentData, incoming: BackupFile): MergePlan {
+  const data = migrateBackupToLatest(incoming).data
+
+  const byNewId = <T extends { id: string }>(existing: T[], items: T[]) => {
+    const ids = new Set(existing.map((r) => r.id))
+    const fresh: T[] = []
+    for (const item of items) {
+      if (ids.has(item.id)) continue
+      ids.add(item.id)
+      fresh.push(item)
+    }
+    return { fresh, counts: { added: fresh.length, skipped: items.length - fresh.length } }
+  }
+
+  const goals = byNewId(current.goals, data.goals)
+  const recurring = byNewId(current.recurringDefinitions, data.recurringDefinitions)
+  const habits = byNewId(current.habits, data.habits)
+
+  const maxOrder = current.habits.reduce((m, h) => Math.max(m, h.order), -1)
+  const newHabits = [...habits.fresh]
+    .sort((a, b) => a.order - b.order)
+    .map((h, i) => ({ ...h, order: maxOrder + 1 + i }))
+
+  const habitIds = new Set([...current.habits, ...newHabits].map((h) => h.id))
+  const completionIds = new Set(current.habitCompletions.map((c) => c.id))
+  const completionPeriods = new Set(current.habitCompletions.map((c) => `${c.habitId}|${c.periodId}`))
+  const newCompletions: HabitCompletion[] = []
+  for (const c of data.habitCompletions) {
+    const period = `${c.habitId}|${c.periodId}`
+    if (completionIds.has(c.id) || completionPeriods.has(period) || !habitIds.has(c.habitId)) continue
+    completionIds.add(c.id)
+    completionPeriods.add(period)
+    newCompletions.push(c)
+  }
+
+  const snapshotWeeks = new Set(current.weeklySnapshots.map((s) => s.weekId))
+  const newSnapshots: WeeklySnapshot[] = []
+  for (const s of data.weeklySnapshots) {
+    if (snapshotWeeks.has(s.weekId)) continue
+    snapshotWeeks.add(s.weekId)
+    newSnapshots.push(s)
+  }
+
+  return {
+    toAdd: {
+      goals: goals.fresh,
+      recurringDefinitions: recurring.fresh,
+      habits: newHabits,
+      habitCompletions: newCompletions,
+      weeklySnapshots: newSnapshots,
+    },
+    summary: {
+      goals: goals.counts,
+      recurringDefinitions: recurring.counts,
+      habits: habits.counts,
+      habitCompletions: { added: newCompletions.length, skipped: data.habitCompletions.length - newCompletions.length },
+      weeklySnapshots: { added: newSnapshots.length, skipped: data.weeklySnapshots.length - newSnapshots.length },
+    },
+  }
+}
+
+async function readCurrentData(): Promise<CurrentData> {
+  const [goals, recurringDefinitions, habits, habitCompletions, weeklySnapshots] = await Promise.all([
+    db.goals.toArray(),
+    db.recurringDefinitions.toArray(),
+    db.habits.toArray(),
+    db.habitCompletions.toArray(),
+    db.weeklySnapshots.toArray(),
+  ])
+  return { goals, recurringDefinitions, habits, habitCompletions, weeklySnapshots }
+}
+
+/** What "Add from file" would do with this validated backup, without writing anything. */
+export async function previewBackupMerge(rawBackup: BackupFile): Promise<MergeSummary> {
+  return planBackupMerge(await readCurrentData(), rawBackup).summary
+}
+
+/**
+ * Adds a validated backup's records to the local data without removing or
+ * changing anything already stored (see planBackupMerge for the rules).
+ * Planned and written inside one transaction, so it is atomic and running it
+ * twice with the same file adds nothing the second time.
+ */
+export async function mergeBackup(rawBackup: BackupFile): Promise<MergeSummary> {
+  return db.transaction(
+    'rw',
+    [db.goals, db.recurringDefinitions, db.habits, db.habitCompletions, db.weeklySnapshots],
+    async () => {
+      const { toAdd, summary } = planBackupMerge(await readCurrentData(), rawBackup)
+      await Promise.all([
+        db.goals.bulkAdd(toAdd.goals),
+        db.recurringDefinitions.bulkAdd(toAdd.recurringDefinitions),
+        db.habits.bulkAdd(toAdd.habits),
+        db.habitCompletions.bulkAdd(toAdd.habitCompletions),
+        db.weeklySnapshots.bulkAdd(toAdd.weeklySnapshots),
+      ])
+      return summary
+    },
+  )
+}

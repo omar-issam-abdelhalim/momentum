@@ -108,7 +108,7 @@ To move your data to another device, or to keep a backup, use **Settings → Exp
 - **Daily & weekly habits** with current/best streak tracking, optional Mon/Wed/Fri-style weekday scheduling, and a full pause/resume lifecycle with an epoch-aware, day-by-day consistency grid — see [Habits, pause/resume & the Analysis screen](#habits-pauseresume--the-analysis-screen).
 - **A real Activity archive** — completed items organized by Year → Month, kept in detail for about two years.
 - **Analytics across six time ranges** — All, Week, Month, Quarter, Half-Year, Year — with navigation between periods.
-- **Backup & restore** — export everything to a single JSON file, validate and re-import it later, with automatic migration from older backup versions.
+- **Backup & restore** — export everything to a single JSON file, validate and re-import it later, with automatic migration from older backup versions — or add a file's records on top of your existing data without erasing anything.
 - **Installable, fully offline PWA** — add it to your phone's home screen and use it with no network connection.
 - **Light / dark / system theming**, designed intentionally for both, not just an inverted palette.
 
@@ -300,7 +300,7 @@ Everything — goals/tasks, recurring-task definitions, habits, completions, wee
 
 ## Backup, export & import
 
-Settings → **Export backup** downloads a timestamped, schema-versioned JSON file. **Import backup** validates the file's structure before touching anything; on a valid file it asks for confirmation, then replaces all local data with the backup's contents. Backups exported from the original v1 release are still importable — they're automatically migrated to the current schema (a v1 "Daily" goal maps to today's **Today Only** type, since that's exactly how it already behaved). Import still replaces rather than merges — the safer choice with no conflict-resolution UI yet.
+Settings → **Export backup** downloads a timestamped, schema-versioned JSON file. **Import backup** validates the file's structure before touching anything; on a valid file it asks for confirmation, then replaces all local data with the backup's contents. Backups exported from the original v1 release are still importable — they're automatically migrated to the current schema (a v1 "Daily" goal maps to today's **Today Only** type, since that's exactly how it already behaved). Import replaces everything on the device. To keep your data and only add records from a file, use **Add from file** instead: it adds goals, recurring tasks and habits whose ids are new, habit check-ins for a habit and period that has none yet, and weekly snapshots for weeks that don't have one — it never changes or removes anything already stored and never touches settings, so adding the same file twice adds nothing the second time.
 
 ## Offline-first behavior
 
@@ -390,7 +390,7 @@ All four are expected to pass cleanly before any change is considered done.
 ## Limitations
 
 - No cloud sync — data is per-device; use Export/Import to move it between devices.
-- Import replaces all local data rather than merging with existing data.
+- Add from file never updates an existing record from the file — a record whose id is already on the device is skipped, not overwritten.
 - Analytics reflects weeks the app has actually tracked through; a task manually backdated to a calendar week before the app was first opened (or before that week was ever "seen") won't retroactively appear in weekly aggregates — it remains fully functional and visible on Home either way.
 - App icons are generated placeholder monograms, not custom artwork.
 - The habit consistency grid renders past days against a habit's *current* weekday schedule — if the schedule was edited, historical days aren't retroactively re-evaluated against whatever the schedule was at the time (see [Habits, pause/resume & the Analysis screen](#habits-pauseresume--the-analysis-screen)).
