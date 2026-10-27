@@ -1,11 +1,21 @@
 import { useRef, useState } from 'react'
-import { Download, FlaskConical, Info, Moon, Sun, Trash2, Upload, Monitor as MonitorIcon } from 'lucide-react'
+import { Download, FilePlus2, FlaskConical, Info, Moon, Sun, Trash2, Upload, Monitor as MonitorIcon } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useToast } from '@/components/ui/Toast'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Button } from '@/components/ui/Button'
 import { APP_CONFIG } from '@/config/app.config'
-import { buildBackup, downloadBackup, importBackup, validateBackupFile } from '@/lib/backup/backup'
+import {
+  buildBackup,
+  downloadBackup,
+  importBackup,
+  describeMergeAdds,
+  mergeAddedTotal,
+  mergeBackup,
+  previewBackupMerge,
+  validateBackupFile,
+  type MergeSummary,
+} from '@/lib/backup/backup'
 import { db } from '@/lib/db/db'
 import { seedDevData } from '@/lib/seed/seedData'
 import type { BackupFile, ThemePreference } from '@/types/models'
@@ -20,8 +30,10 @@ export function SettingsScreen() {
   const { theme, setTheme } = useTheme()
   const { showToast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mergeInputRef = useRef<HTMLInputElement>(null)
 
   const [pendingImport, setPendingImport] = useState<BackupFile | null>(null)
+  const [pendingMerge, setPendingMerge] = useState<{ backup: BackupFile; summary: MergeSummary } | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [confirmClearOpen, setConfirmClearOpen] = useState(false)
   const [storageEstimate, setStorageEstimate] = useState<string | null>(null)
@@ -49,6 +61,38 @@ export function SettingsScreen() {
     } catch {
       setImportError('That file could not be read as a valid backup.')
     }
+  }
+
+  const handleMergeFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setImportError(null)
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(await file.text())
+    } catch {
+      setImportError('That file could not be read as a valid backup.')
+      return
+    }
+    const { valid, errors } = validateBackupFile(parsed)
+    if (!valid) {
+      setImportError(errors.join(' '))
+      return
+    }
+    const summary = await previewBackupMerge(parsed as BackupFile)
+    if (mergeAddedTotal(summary) === 0) {
+      showToast('Everything in that file is already here')
+      return
+    }
+    setPendingMerge({ backup: parsed as BackupFile, summary })
+  }
+
+  const confirmMerge = async () => {
+    if (!pendingMerge) return
+    const summary = await mergeBackup(pendingMerge.backup)
+    setPendingMerge(null)
+    showToast(`Added ${describeMergeAdds(summary)}`)
   }
 
   const confirmImport = async () => {
@@ -132,6 +176,18 @@ export function SettingsScreen() {
             Import backup
           </button>
           <input ref={fileInputRef} type="file" accept="application/json" className="hidden" onChange={handleFileChosen} />
+          <button
+            type="button"
+            onClick={() => mergeInputRef.current?.click()}
+            className="flex items-center gap-3 rounded-xl border border-border bg-surface-raised px-4 py-3.5 text-left text-sm font-medium text-ink shadow-soft hover:bg-surface-sunken"
+          >
+            <FilePlus2 size={18} className="text-ink-muted" />
+            Add from file
+          </button>
+          <input ref={mergeInputRef} type="file" accept="application/json" className="hidden" onChange={handleMergeFileChosen} />
+          <p className="px-1 text-xs text-ink-muted">
+            Import backup replaces everything on this device. Add from file keeps your data and only adds what is new.
+          </p>
           {importError && <p className="text-xs text-danger">{importError}</p>}
 
           <button
@@ -198,6 +254,19 @@ export function SettingsScreen() {
         destructive
         onConfirm={confirmImport}
         onCancel={() => setPendingImport(null)}
+      />
+
+      <ConfirmDialog
+        open={!!pendingMerge}
+        title="Add to your data?"
+        description={
+          pendingMerge
+            ? `This adds ${describeMergeAdds(pendingMerge.summary)}. Nothing already on this device is changed or removed.`
+            : ''
+        }
+        confirmLabel="Add"
+        onConfirm={confirmMerge}
+        onCancel={() => setPendingMerge(null)}
       />
 
       <ConfirmDialog

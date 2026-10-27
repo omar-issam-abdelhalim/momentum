@@ -1,6 +1,15 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildBackup, importBackup, migrateBackupToLatest, validateBackupFile } from './backup'
+import {
+  buildBackup,
+  describeMergeAdds,
+  importBackup,
+  mergeAddedTotal,
+  mergeBackup,
+  migrateBackupToLatest,
+  previewBackupMerge,
+  validateBackupFile,
+} from './backup'
 import { db } from '@/lib/db/db'
 import type { BackupFile } from '@/types/models'
 
@@ -433,5 +442,120 @@ describe('importBackup', () => {
     expect(rebuilt.data.goals[0].targetCount).toBe(5)
     expect(rebuilt.data.habits[0].dailyTarget).toBe(3)
     expect(rebuilt.data.habitCompletions[0].count).toBe(2)
+  })
+})
+
+describe('mergeBackup (Add from file)', () => {
+  beforeEach(async () => {
+    await db.goals.clear()
+    await db.recurringDefinitions.clear()
+    await db.habits.clear()
+    await db.habitCompletions.clear()
+    await db.weeklySnapshots.clear()
+    await db.settings.clear()
+  })
+
+  async function seedExisting() {
+    await importBackup(validBackup())
+    await db.settings.update('app', { theme: 'dark' })
+    return JSON.parse(JSON.stringify(await buildBackup())) as BackupFile
+  }
+
+  function incomingBackup(): BackupFile {
+    const b = validBackup()
+    b.schemaVersion = 4
+    b.data.goals = [
+      { ...b.data.goals[0], title: 'CHANGED title must not overwrite' },
+      { ...b.data.goals[0], id: 'g2', title: 'New goal' },
+    ]
+    b.data.recurringDefinitions = [{ ...b.data.recurringDefinitions[0], id: 'r2', title: 'New recurring' }]
+    b.data.habits = [
+      { id: 'h1', name: 'CHANGED', frequency: 'daily', order: 0, status: 'active', epochs: [], createdAt: 1 },
+      { id: 'h2', name: 'New habit', frequency: 'daily', order: 0, status: 'active', epochs: [{ id: 'e2', startDate: 1, endDate: null }], createdAt: 1 },
+    ]
+    b.data.habitCompletions = [
+      { id: 'c1', habitId: 'h1', periodId: '2026-07-18', completedAt: 1 }, // same id
+      { id: 'c9', habitId: 'h1', periodId: '2026-07-18', completedAt: 1 }, // same habit + period
+      { id: 'c2', habitId: 'h2', periodId: '2026-07-19', completedAt: 1 }, // new
+      { id: 'c3', habitId: 'nope', periodId: '2026-07-19', completedAt: 1 }, // orphan
+    ]
+    b.data.weeklySnapshots = [
+      { ...b.data.weeklySnapshots[0], weeklyPlanned: 99 }, // week already snapshotted
+      { ...b.data.weeklySnapshots[0], weekId: '2026-07-25' },
+    ]
+    b.data.settings = [{ id: 'app', theme: 'light', lastWeekIdSeen: '2020-01-04', lastCleanupAt: null, onboarded: false }]
+    return b
+  }
+
+  it('adds only new records and never changes or removes existing ones', async () => {
+    const before = await seedExisting()
+    const summary = await mergeBackup(incomingBackup())
+
+    expect(summary).toEqual({
+      goals: { added: 1, skipped: 1 },
+      recurringDefinitions: { added: 1, skipped: 0 },
+      habits: { added: 1, skipped: 1 },
+      habitCompletions: { added: 1, skipped: 3 },
+      weeklySnapshots: { added: 1, skipped: 1 },
+    })
+
+    for (const g of before.data.goals) expect(await db.goals.get(g.id)).toEqual(g)
+    for (const h of before.data.habits) expect(await db.habits.get(h.id)).toEqual(h)
+    for (const c of before.data.habitCompletions) expect(await db.habitCompletions.get(c.id)).toEqual(c)
+    for (const s of before.data.weeklySnapshots) expect(await db.weeklySnapshots.get(s.weekId)).toEqual(s)
+    expect(await db.settings.get('app')).toEqual(before.data.settings[0])
+
+    expect((await db.goals.get('g2'))?.title).toBe('New goal')
+    expect(await db.recurringDefinitions.get('r2')).toBeDefined()
+    expect(await db.habitCompletions.get('c2')).toBeDefined()
+    expect(await db.habitCompletions.get('c3')).toBeUndefined()
+    expect(await db.weeklySnapshots.get('2026-07-25')).toBeDefined()
+  })
+
+  it('appends new habits after existing ones', async () => {
+    await seedExisting()
+    await mergeBackup(incomingBackup())
+    const existingOrder = (await db.habits.get('h1'))!.order
+    expect((await db.habits.get('h2'))!.order).toBe(existingOrder + 1)
+  })
+
+  it('adding the same file twice adds nothing the second time', async () => {
+    await seedExisting()
+    await mergeBackup(incomingBackup())
+    const counts = await Promise.all([db.goals.count(), db.habits.count(), db.habitCompletions.count()])
+    const second = await mergeBackup(incomingBackup())
+    expect(mergeAddedTotal(second)).toBe(0)
+    expect(await Promise.all([db.goals.count(), db.habits.count(), db.habitCompletions.count()])).toEqual(counts)
+  })
+
+  it('preview reports the same counts without writing anything', async () => {
+    await seedExisting()
+    const goalsBefore = await db.goals.count()
+    const preview = await previewBackupMerge(incomingBackup())
+    expect(preview.goals).toEqual({ added: 1, skipped: 1 })
+    expect(await db.goals.count()).toBe(goalsBefore)
+  })
+
+  it('migrates older backups before adding (v2 habits gain status and epochs)', async () => {
+    const legacy = validBackup()
+    legacy.data.habits = [{ id: 'h7', name: 'Old', frequency: 'daily', order: 0, active: true, createdAt: 1 } as unknown as BackupFile['data']['habits'][number]]
+    legacy.data.habitCompletions = []
+    await mergeBackup(legacy)
+    const h = await db.habits.get('h7')
+    expect(h?.status).toBe('active')
+    expect(h?.epochs).toHaveLength(1)
+  })
+
+  it('describes what was added in plain words', () => {
+    const z = { added: 0, skipped: 0 }
+    expect(describeMergeAdds({ goals: { added: 133, skipped: 0 }, recurringDefinitions: { added: 3, skipped: 0 }, habits: { added: 1, skipped: 0 }, habitCompletions: z, weeklySnapshots: z }))
+      .toBe('133 tasks, 3 recurring tasks and 1 habit')
+    expect(describeMergeAdds({ goals: { added: 1, skipped: 0 }, recurringDefinitions: z, habits: z, habitCompletions: z, weeklySnapshots: z })).toBe('1 task')
+  })
+
+  it('works on an empty device and leaves settings untouched', async () => {
+    await mergeBackup(incomingBackup())
+    expect(await db.goals.count()).toBe(2)
+    expect(await db.settings.count()).toBe(0)
   })
 })
