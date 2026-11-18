@@ -1,22 +1,12 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { Check, X } from 'lucide-react'
-
-interface ToastAction {
-  label: string
-  onAction: () => void
-}
+import { ToastContext, type ToastAction } from '@/components/ui/toastContext'
 
 interface ToastItem {
   id: string
   message: string
   action?: ToastAction
 }
-
-interface ToastContextValue {
-  showToast: (message: string, action?: ToastAction) => void
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null)
 
 const DURATION_MS = 5000
 
@@ -83,10 +73,4 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </div>
     </ToastContext.Provider>
   )
-}
-
-export function useToast(): ToastContextValue {
-  const ctx = useContext(ToastContext)
-  if (!ctx) throw new Error('useToast must be used within a ToastProvider')
-  return ctx
 }
