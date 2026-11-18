@@ -17,7 +17,7 @@ import {
 import { targetForHabit } from '@/lib/logic/habitProgress'
 import { HabitConsistencyGrid } from '@/components/habits/HabitConsistencyGrid'
 import { Button } from '@/components/ui/Button'
-import { useToast } from '@/components/ui/Toast'
+import { useToast } from '@/components/ui/toastContext'
 import type { HabitEpoch } from '@/types/models'
 
 interface HabitAnalysisScreenProps {

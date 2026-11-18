@@ -13,7 +13,7 @@ import type { Habit, HabitCompletion, HabitEpoch } from '@/types/models'
 
 /**
  * Epoch statistics are DERIVED (never persisted as snapshots). Architecture
- * decision, made by inspecting the real codebase (see PROJECT_CONTEXT.md):
+ * decision:
  * HabitCompletion records are permanent and immutable — lib/db/cleanupRunner.ts
  * explicitly never touches habits or habitCompletions, unlike Goals, which
  * age out under a 2-year retention policy. Since completion history is

@@ -102,8 +102,7 @@ export type HabitFrequency = 'daily' | 'weekly'
  * Extensible habit lifecycle status. Only 'active' and 'paused' are
  * implemented/exposed today. Represented as a string union (not a boolean)
  * specifically so a future 'retired' value (habit graduated to automatic,
- * no longer tracked) can be added later without a breaking migration — see
- * PROJECT_CONTEXT.md for the full rationale. No automatic time-based
+ * no longer tracked) can be added later without a breaking migration. No automatic time-based
  * transitions between statuses; every change is an explicit user action.
  */
 export type HabitStatus = 'active' | 'paused'
@@ -115,8 +114,7 @@ export type HabitStatus = 'active' | 'paused'
  * chronological order. Epoch statistics (completion rate, streaks, etc.) are
  * deliberately NOT stored here — they are derived on demand from immutable
  * HabitCompletion records bounded by [startDate, endDate ?? now]. See
- * lib/logic/epochs.ts and PROJECT_CONTEXT.md for the derived-vs-snapshot
- * architecture decision.
+ * lib/logic/epochs.ts for the derived-vs-snapshot architecture decision.
  */
 export interface HabitEpoch {
   id: string

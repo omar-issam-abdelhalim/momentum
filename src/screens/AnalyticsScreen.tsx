@@ -22,7 +22,7 @@ import {
   type AnalyticsSelection,
 } from '@/lib/date/ranges'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { HABIT_ICONS } from '@/components/habits/HabitFormSheet'
+import { HABIT_ICONS } from '@/components/habits/habitIcons'
 
 const chartTooltipStyle = {
   background: 'rgb(var(--surface-raised))',

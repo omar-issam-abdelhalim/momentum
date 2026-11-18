@@ -4,8 +4,8 @@ import { tracksLateness } from './goalKind'
 /**
  * Home priority buckets, most urgent first. A future deadline must never
  * outrank a task scheduled for today — but once a deadline reaches today (or
- * is overdue), it dominates. See PROJECT_CONTEXT.md / README for the worked
- * examples this ordering is derived from.
+ * is overdue), it dominates. See the README's "Home priority order" section
+ * for the worked examples this ordering is derived from.
  */
 export const PRIORITY_BUCKETS = [
   'overdue-deadline',

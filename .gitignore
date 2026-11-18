@@ -36,10 +36,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Local tooling (this AI coding assistant's per-machine settings, not part of the app)
-.claude/
+# Local tool and editor settings (root-level hidden folders), except CI config
+/.*/
+!/.github/
 
-# Local-only persistent project memory for AI assistant sessions — never committed/pushed
+# Local working notes (never committed)
 PROJECT_CONTEXT.md
 
 # Misc

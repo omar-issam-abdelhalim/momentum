@@ -1,19 +1,7 @@
 import { useEffect, useState } from 'react'
-import {
-  Activity,
-  BookOpen,
-  Brain,
-  Droplet,
-  Dumbbell,
-  Moon,
-  PenLine,
-  Salad,
-  Sparkles,
-  Sun,
-  type LucideIcon,
-} from 'lucide-react'
 import { BottomSheet } from '@/components/ui/BottomSheet'
 import { Button } from '@/components/ui/Button'
+import { HABIT_ICONS } from '@/components/habits/habitIcons'
 import type { Habit, HabitFrequency } from '@/types/models'
 
 export interface HabitFormValues {
@@ -34,19 +22,6 @@ interface HabitFormSheetProps {
   onClose: () => void
   onSubmit: (values: HabitFormValues) => void
   initialHabit?: Habit | null
-}
-
-export const HABIT_ICONS: Record<string, LucideIcon> = {
-  sparkles: Sparkles,
-  activity: Activity,
-  book: BookOpen,
-  brain: Brain,
-  droplet: Droplet,
-  dumbbell: Dumbbell,
-  moon: Moon,
-  pen: PenLine,
-  salad: Salad,
-  sun: Sun,
 }
 
 function emptyValues(): HabitFormValues {
